@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Play, Star, Tv } from "lucide-react";
 import { useState } from "react";
@@ -7,6 +7,7 @@ import {
   api,
   errorMessage,
   type CatalogueKind,
+  type Category,
   type PlayableRef,
 } from "@/lib/api";
 import { cn, formatDuration } from "@/lib/utils";
@@ -30,21 +31,38 @@ export function Catalogue({ providerId, kind, onPlay }: Props) {
 
   return (
     <div className="flex min-h-0 flex-1">
-      <nav className="w-56 shrink-0 overflow-y-auto border-r border-[var(--border)] p-2">
+      <nav className="w-60 shrink-0 overflow-y-auto border-r border-[var(--border)] p-2">
         <CategoryButton
           active={categoryId === null}
           onClick={() => setCategoryId(null)}
           name="All"
         />
-        {categories.data?.map((c) => (
-          <CategoryButton
-            key={c.id}
-            active={categoryId === c.id}
-            onClick={() => setCategoryId(c.id)}
-            name={c.name}
-            count={c.count}
-          />
-        ))}
+        {withRegionHeadings(categories.data ?? []).map((row) =>
+          row.heading ? (
+            <p
+              key={`h-${row.regionCode}`}
+              className="mt-4 mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]"
+            >
+              {row.heading}
+            </p>
+          ) : (
+            <CategoryButton
+              key={row.category!.id}
+              active={categoryId === row.category!.id}
+              onClick={() => setCategoryId(row.category!.id)}
+              name={row.category!.name}
+              count={row.category!.count}
+              star={
+                <CategoryStar
+                  providerId={providerId}
+                  kind={kind}
+                  categoryId={row.category!.id}
+                  active={row.category!.isFavourite}
+                />
+              }
+            />
+          ),
+        )}
       </nav>
 
       <div className="min-w-0 flex-1 overflow-y-auto">
@@ -68,26 +86,91 @@ export function Catalogue({ providerId, kind, onPlay }: Props) {
   );
 }
 
+/**
+ * Inserts a heading each time the Region changes.
+ *
+ * The list arrives already ordered by Region, then Favourite, then name, so a
+ * change of regionCode is the group boundary — no sorting happens here.
+ */
+function withRegionHeadings(categories: Category[]) {
+  const rows: {
+    heading?: string;
+    regionCode?: string;
+    category?: Category;
+  }[] = [];
+  let current: string | null = null;
+  for (const category of categories) {
+    if (category.regionCode !== current) {
+      current = category.regionCode;
+      rows.push({ heading: category.regionLabel, regionCode: current });
+    }
+    rows.push({ category });
+  }
+  return rows;
+}
+
+function CategoryStar({
+  providerId,
+  kind,
+  categoryId,
+  active,
+}: {
+  providerId: number;
+  kind: CatalogueKind;
+  categoryId: number;
+  active: boolean;
+}) {
+  const qc = useQueryClient();
+  const toggle = useMutation({
+    mutationFn: () => api.toggleCategoryFavourite(providerId, kind, categoryId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["categories"] }),
+  });
+  return (
+    <span
+      role="button"
+      title={active ? "Unstar this category" : "Star this category"}
+      onClick={(e) => {
+        e.stopPropagation();
+        toggle.mutate();
+      }}
+      className={cn(
+        "shrink-0 rounded p-0.5 hover:bg-[var(--background)]",
+        active ? "" : "opacity-0 group-hover/cat:opacity-100",
+      )}
+    >
+      <Star
+        className={cn(
+          "size-3.5",
+          active && "fill-current text-[var(--primary)]",
+        )}
+      />
+    </span>
+  );
+}
+
 function CategoryButton({
   active,
   onClick,
   name,
   count,
+  star,
 }: {
   active: boolean;
   onClick: () => void;
   name: string;
   count?: number;
+  star?: React.ReactNode;
 }) {
   return (
     <button
       onClick={onClick}
       className={cn(
-        "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm",
+        "group/cat flex w-full items-center gap-1.5 rounded-md px-2.5 py-1.5 text-left text-sm",
         active ? "bg-[var(--accent)] font-medium" : "hover:bg-[var(--accent)]",
       )}
     >
-      <span className="truncate">{name}</span>
+      {star}
+      <span className="min-w-0 flex-1 truncate">{name}</span>
       {count != null ? (
         <span className="shrink-0 text-xs text-[var(--muted-foreground)] tabular-nums">
           {count}

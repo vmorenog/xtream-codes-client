@@ -28,6 +28,10 @@ anything you can hit play on. Read it before writing code — it is short.
 
 - **Home**: favourite **Channels**, then **Continue Watching**, then pinned
   Series and Movies
+- **Regions**: Categories are tagged by country or language at Sync, and you
+  choose which to show and in what order. Hidden Regions leave the rail *and*
+  search ([ADR-0008](docs/adr/0008-region-is-derived-from-the-category.md))
+- Star a **Category** to float it to the top of its Region
 - Holds several **Providers**; every catalogue row is scoped to one
 - Browses **Channels**, **Movies** and **Series** by **Category**
 - Shows the **Schedule** (EPG) for a **Channel**

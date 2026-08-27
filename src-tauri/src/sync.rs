@@ -9,6 +9,7 @@ use tauri::{AppHandle, Emitter};
 use crate::db::model::{Channel, Episode, Movie, Programme, Series};
 use crate::db::{CatalogueBatch, Db};
 use crate::error::Result;
+use crate::region;
 use crate::xtream::de::maybe_base64;
 use crate::xtream::{CatalogueKind, XtreamClient};
 
@@ -19,6 +20,20 @@ pub struct SyncProgress {
     /// `"categories"`, `"channels"`, `"movies"`, `"series"`, `"saving"`, `"done"`
     pub stage: &'static str,
     pub items: usize,
+}
+
+/// What a **Sync** did, beyond the counts.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncReport {
+    pub channels: i64,
+    pub movies: i64,
+    pub series: i64,
+    /// Rows the **Provider** ships as separators, dropped on the way in.
+    pub dividers_dropped: i64,
+    /// **Regions** seen for the first time. Hidden on arrival once the
+    /// **Viewer** has curated, so this count is how they find out (ADR-0008).
+    pub new_regions: i64,
 }
 
 fn report(app: &AppHandle, provider_id: i64, stage: &'static str, items: usize) {
@@ -42,7 +57,7 @@ pub async fn sync_catalogue(
     db: &Db,
     client: &XtreamClient,
     provider_id: i64,
-) -> Result<CatalogueBatch> {
+) -> Result<(CatalogueBatch, i64)> {
     let entitlement = client.handshake().await?;
     db.record_entitlement(
         provider_id,
@@ -67,10 +82,13 @@ pub async fn sync_catalogue(
     }
     report(app, provider_id, "categories", batch.categories.len());
 
-    batch.channels = client
-        .channels()
-        .await?
+    let raw_channels = client.channels().await?;
+    let before = raw_channels.len();
+    batch.channels = raw_channels
         .into_iter()
+        // Providers ship `======= BULGARIAN =======` rows as Channels purely to
+        // draw a line. They are unplayable, so they never enter the mirror.
+        .filter(|c| !c.name.as_deref().is_some_and(region::is_divider))
         .filter_map(|c| {
             Some(Channel {
                 stream_id: c.stream_id,
@@ -85,6 +103,7 @@ pub async fn sync_catalogue(
             })
         })
         .collect();
+    let dividers_dropped = (before - batch.channels.len()) as i64;
     report(app, provider_id, "channels", batch.channels.len());
 
     batch.movies = client
@@ -124,7 +143,7 @@ pub async fn sync_catalogue(
         .collect();
     report(app, provider_id, "series", batch.series.len());
 
-    Ok(batch)
+    Ok((batch, dividers_dropped))
 }
 
 /// Fetches one **Series**' **Episodes**. Called when a Series is opened.

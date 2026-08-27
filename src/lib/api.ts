@@ -13,7 +13,7 @@ export type CatalogueKind = "live" | "movie" | "series";
 export type PlayableKind = "channel" | "movie" | "episode";
 
 /** Wider than PlayableKind: a Series is favouritable but not playable. */
-export type FavouriteKind = PlayableKind | "series";
+export type FavouriteKind = PlayableKind | "series" | "category";
 
 export interface PlayableRef {
   providerId: number;
@@ -53,6 +53,29 @@ export interface Category {
   id: number;
   name: string;
   count: number;
+  /** Always set; "OTHER" when the name gave nothing away. */
+  regionCode: string;
+  regionLabel: string;
+  isFavourite: boolean;
+}
+
+export interface Region {
+  code: string;
+  label: string;
+  visible: boolean;
+  sortOrder: number;
+  categoryCount: number;
+  /** Arrived in a later Sync and was hidden on arrival. */
+  isNew: boolean;
+}
+
+export interface SyncReport {
+  channels: number;
+  movies: number;
+  series: number;
+  /** Separator rows the Provider ships as Channels, dropped on the way in. */
+  dividersDropped: number;
+  newRegions: number;
 }
 
 export interface ResumePoint {
@@ -167,7 +190,36 @@ export const api = {
   removeProvider: (providerId: number) =>
     invoke<void>("provider_remove", { providerId }),
   sync: (providerId: number) =>
-    invoke<CatalogueCounts>("provider_sync", { providerId }),
+    invoke<SyncReport>("provider_sync", { providerId }),
+
+  regions: (providerId: number) => invoke<Region[]>("regions", { providerId }),
+  setRegionVisible: (providerId: number, code: string, visible: boolean) =>
+    invoke<void>("set_region_visible", { providerId, code, visible }),
+  /** `codes` top first; anything omitted falls to the end. */
+  setRegionOrder: (providerId: number, codes: string[]) =>
+    invoke<void>("set_region_order", { providerId, codes }),
+  setCategoryRegion: (
+    providerId: number,
+    kind: CatalogueKind,
+    categoryId: number,
+    code: string | null,
+  ) =>
+    invoke<void>("set_category_region", {
+      providerId,
+      kind,
+      categoryId,
+      code,
+    }),
+  toggleCategoryFavourite: (
+    providerId: number,
+    kind: CatalogueKind,
+    categoryId: number,
+  ) =>
+    invoke<boolean>("toggle_category_favourite", {
+      providerId,
+      kind,
+      categoryId,
+    }),
 
   categories: (providerId: number, kind: CatalogueKind) =>
     invoke<Category[]>("categories", { providerId, kind }),

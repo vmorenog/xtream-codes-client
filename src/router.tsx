@@ -7,6 +7,7 @@ import {
 import { App } from "@/App";
 import { Catalogue, SeriesDetail } from "@/components/Catalogue";
 import { Home } from "@/components/Home";
+import { Settings } from "@/components/Settings";
 import { useApp } from "@/lib/app-context";
 
 const rootRoute = createRootRoute({ component: App });
@@ -40,6 +41,12 @@ const seriesRoute = createRoute({
   component: () => <CatalogueRoute kind="series" />,
 });
 
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings",
+  component: Settings,
+});
+
 const seriesDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/series/$seriesId",
@@ -62,6 +69,7 @@ const routeTree = rootRoute.addChildren([
   moviesRoute,
   seriesRoute,
   seriesDetailRoute,
+  settingsRoute,
 ]);
 
 export const router = createRouter({ routeTree });

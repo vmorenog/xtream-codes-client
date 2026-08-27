@@ -193,6 +193,64 @@ const MIGRATIONS: &[&str] = &[
            AND e.episode_id = watch_state.ref_id
     ) WHERE kind = 'episode';
     "#,
+    // 0003 — Regions, Viewer settings, and Categories as Favourites (ADR-0008).
+    r#"
+    -- Derived at Sync from the Category name, recomputed every Sync.
+    ALTER TABLE categories ADD COLUMN region_code TEXT;
+    CREATE INDEX categories_by_region ON categories(provider_id, kind, region_code);
+
+    -- Lives outside `categories` because replace_catalogue wipes that table on
+    -- every Sync, and a Viewer's correction must outlive a refresh.
+    CREATE TABLE category_region_override (
+        provider_id    INTEGER NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+        catalogue_kind TEXT    NOT NULL CHECK (catalogue_kind IN ('live','movie','series')),
+        category_id    INTEGER NOT NULL,
+        region_code    TEXT,
+        PRIMARY KEY (provider_id, catalogue_kind, category_id)
+    ) WITHOUT ROWID;
+
+    -- Which Regions the Viewer shows, and in what order. A missing row means
+    -- "new since the Viewer curated", which is why providers.regions_curated
+    -- exists: before curation a missing row means "show it".
+    CREATE TABLE region_settings (
+        provider_id INTEGER NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+        region_code TEXT    NOT NULL,
+        visible     INTEGER NOT NULL DEFAULT 1,
+        sort_order  INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (provider_id, region_code)
+    ) WITHOUT ROWID;
+
+    ALTER TABLE providers ADD COLUMN regions_curated INTEGER NOT NULL DEFAULT 0;
+
+    -- Rebuilt again to admit 'category'. A Category Favourite stores its
+    -- ref_id as "<catalogue kind>:<category id>", e.g. "live:42", because a
+    -- Category is identified by a pair and this table holds one string.
+    CREATE TABLE favourites_v3 (
+        provider_id   INTEGER NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+        kind          TEXT    NOT NULL CHECK (kind IN ('channel','movie','episode','series','category')),
+        ref_id        TEXT    NOT NULL,
+        name_snapshot TEXT,
+        created_at    INTEGER NOT NULL,
+        PRIMARY KEY (provider_id, kind, ref_id)
+    ) WITHOUT ROWID;
+
+    INSERT INTO favourites_v3 SELECT * FROM favourites;
+    DROP TABLE favourites;
+    ALTER TABLE favourites_v3 RENAME TO favourites;
+    "#,
+    // 0004 — the search index carries its Region, so hiding one hides it from
+    // search too without a three-way join per hit (ADR-0008).
+    r#"
+    DROP TABLE playables_fts;
+    CREATE VIRTUAL TABLE playables_fts USING fts5(
+        name,
+        provider_id UNINDEXED,
+        kind        UNINDEXED,
+        ref_id      UNINDEXED,
+        region_code UNINDEXED,
+        tokenize    = "unicode61 remove_diacritics 2"
+    );
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {

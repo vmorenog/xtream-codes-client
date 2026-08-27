@@ -40,6 +40,25 @@ pub struct Category {
     pub id: i64,
     pub name: String,
     pub count: i64,
+    /// Always set. `OTHER` when the name gave nothing away.
+    pub region_code: String,
+    pub region_label: String,
+    pub is_favourite: bool,
+}
+
+/// A **Region** as Settings shows it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Region {
+    pub code: String,
+    pub label: String,
+    pub visible: bool,
+    pub sort_order: i64,
+    /// How many **Categories** across the whole **Catalogue** sit in it.
+    pub category_count: i64,
+    /// True until the **Viewer** has curated, or for one that arrived in a
+    /// later **Sync** and was hidden on arrival (ADR-0008).
+    pub is_new: bool,
 }
 
 #[derive(Debug, Serialize)]

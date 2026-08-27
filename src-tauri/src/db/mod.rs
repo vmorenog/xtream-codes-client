@@ -1,13 +1,15 @@
 pub mod model;
 pub mod schema;
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, Result};
-use crate::xtream::{CatalogueKind, FavouriteKind, PlayableKind};
+use crate::region;
+use crate::xtream::{decode_category_ref, CatalogueKind, FavouriteKind, PlayableKind};
 use model::*;
 
 /// The local mirror of every **Provider**'s **Catalogue** (ADR-0004).
@@ -23,7 +25,10 @@ impl Db {
         }
         let conn = Connection::open(path)?;
         schema::migrate(&conn)?;
-        Ok(Self(Mutex::new(conn)))
+        let db = Self(Mutex::new(conn));
+        db.backfill_regions()?;
+        db.rebuild_search_index_if_empty()?;
+        Ok(db)
     }
 
     #[cfg(test)]
@@ -31,6 +36,83 @@ impl Db {
         let conn = Connection::open_in_memory()?;
         schema::migrate(&conn)?;
         Ok(Self(Mutex::new(conn)))
+    }
+
+    /// Tags **Categories** that predate Regions, so an upgraded database works
+    /// immediately instead of only after the next **Sync**.
+    ///
+    /// A NULL `region_code` means "never computed"; `OTHER` means "computed and
+    /// nothing matched" — so this never re-runs over rows it has already seen.
+    fn backfill_regions(&self) -> Result<()> {
+        let pending: Vec<(String, i64, String)> = {
+            let conn = self.conn();
+            let mut stmt = conn.prepare(
+                "SELECT kind, category_id, name FROM categories WHERE region_code IS NULL",
+            )?;
+            let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        if pending.is_empty() {
+            return Ok(());
+        }
+        tracing::info!(count = pending.len(), "tagging categories with a region");
+
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        {
+            let mut upd = tx.prepare(
+                "UPDATE categories SET region_code = ?3 WHERE kind = ?1 AND category_id = ?2",
+            )?;
+            for (kind, id, name) in &pending {
+                let code = region::region_for_category(name).unwrap_or(region::OTHER);
+                upd.execute(params![kind, id, code])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Rebuilds the search index from the mirror when it is empty but the
+    /// **Catalogue** is not.
+    ///
+    /// Migration 0004 drops the index to add a column. Without this, search
+    /// would come back empty after an upgrade and stay that way until the next
+    /// **Sync** — a silent failure, and the worst kind.
+    fn rebuild_search_index_if_empty(&self) -> Result<()> {
+        let conn = self.conn();
+        let indexed: i64 =
+            conn.query_row("SELECT COUNT(*) FROM playables_fts", [], |r| r.get(0))?;
+        let channels: i64 = conn.query_row("SELECT COUNT(*) FROM channels", [], |r| r.get(0))?;
+        if indexed > 0 || channels == 0 {
+            return Ok(());
+        }
+        drop(conn);
+
+        tracing::info!("rebuilding the search index after a schema change");
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        for (table, kind, id_col, cat_kind) in [
+            ("channels", "channel", "stream_id", "live"),
+            ("movies", "movie", "stream_id", "movie"),
+            ("series", "series", "series_id", "series"),
+        ] {
+            tx.execute(
+                &format!(
+                    "INSERT INTO playables_fts (name, provider_id, kind, ref_id, region_code)
+                     SELECT t.name, t.provider_id, ?1, CAST(t.{id_col} AS TEXT),
+                            COALESCE(
+                                (SELECT c.region_code FROM categories c
+                                  WHERE c.provider_id = t.provider_id
+                                    AND c.kind = ?2
+                                    AND c.category_id = t.category_id),
+                                ?3)
+                       FROM {table} t"
+                ),
+                params![kind, cat_kind, region::OTHER],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     fn conn(&self) -> std::sync::MutexGuard<'_, Connection> {
@@ -132,7 +214,17 @@ impl Db {
 
     // ---- Catalogue reads -------------------------------------------------
 
+    /// **Categories** for one part of the **Catalogue**, filtered to the
+    /// **Regions** the **Viewer** shows and ordered Region, then **Favourite**,
+    /// then name.
+    ///
+    /// Ordered in Rust rather than SQL because the Region's position comes from
+    /// `region_settings` and its tie-break is a human label, neither of which
+    /// SQL can reach without a join that obscures the rule.
     pub fn categories(&self, provider_id: i64, kind: CatalogueKind) -> Result<Vec<Category>> {
+        let settings = self.region_settings(provider_id)?;
+        let curated = self.regions_curated(provider_id)?;
+
         let table = match kind {
             CatalogueKind::Live => "channels",
             CatalogueKind::Movie => "movies",
@@ -140,22 +232,213 @@ impl Db {
         };
         let conn = self.conn();
         let sql = format!(
-            "SELECT c.category_id, c.name,
+            "SELECT c.category_id, c.name, c.region_code,
                     (SELECT COUNT(*) FROM {table} t
-                      WHERE t.provider_id = c.provider_id AND t.category_id = c.category_id)
+                      WHERE t.provider_id = c.provider_id AND t.category_id = c.category_id),
+                    EXISTS (SELECT 1 FROM favourites f
+                             WHERE f.provider_id = c.provider_id AND f.kind = 'category'
+                               AND f.ref_id = ?3 || ':' || c.category_id)
              FROM categories c
-             WHERE c.provider_id = ?1 AND c.kind = ?2
-             ORDER BY c.name"
+             WHERE c.provider_id = ?1 AND c.kind = ?2"
         );
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![provider_id, kind.as_str()], |r| {
+        let rows = stmt.query_map(params![provider_id, kind.as_str(), kind.as_str()], |r| {
+            let code: Option<String> = r.get(2)?;
+            let code = code.unwrap_or_else(|| region::OTHER.to_string());
             Ok(Category {
                 id: r.get(0)?,
                 name: r.get(1)?,
-                count: r.get(2)?,
+                region_label: region::region_label(&code).to_string(),
+                region_code: code,
+                count: r.get(3)?,
+                is_favourite: r.get::<_, i64>(4)? != 0,
             })
         })?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+        let mut out = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
+        drop(conn);
+
+        out.retain(|c| is_region_visible(&settings, &c.region_code, curated));
+        sort_categories(&mut out, &settings);
+        Ok(out)
+    }
+
+    /// Every **Region** present in this **Provider**'s **Catalogue**, for Settings.
+    pub fn regions(&self, provider_id: i64) -> Result<Vec<Region>> {
+        let settings = self.region_settings(provider_id)?;
+        let curated = self.regions_curated(provider_id)?;
+
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT COALESCE(region_code, ?2), COUNT(*)
+             FROM categories WHERE provider_id = ?1
+             GROUP BY COALESCE(region_code, ?2)",
+        )?;
+        let rows = stmt.query_map(params![provider_id, region::OTHER], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        let counts = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(stmt);
+        drop(conn);
+
+        let mut out: Vec<Region> = counts
+            .into_iter()
+            .map(|(code, category_count)| {
+                let setting = settings.get(&code);
+                Region {
+                    label: region::region_label(&code).to_string(),
+                    visible: is_region_visible(&settings, &code, curated),
+                    sort_order: setting.map(|s| s.1).unwrap_or(i64::MAX),
+                    // Curated, but no row: this Region arrived in a later Sync
+                    // and was hidden on arrival.
+                    is_new: curated && setting.is_none(),
+                    code,
+                    category_count,
+                }
+            })
+            .collect();
+
+        out.sort_by(|a, b| {
+            a.sort_order
+                .cmp(&b.sort_order)
+                .then_with(|| other_last(&a.code).cmp(&other_last(&b.code)))
+                .then_with(|| a.label.cmp(&b.label))
+        });
+        Ok(out)
+    }
+
+    fn region_settings(&self, provider_id: i64) -> Result<HashMap<String, (bool, i64)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare(
+            "SELECT region_code, visible, sort_order FROM region_settings WHERE provider_id = ?1",
+        )?;
+        let rows = stmt.query_map([provider_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                (r.get::<_, i64>(1)? != 0, r.get::<_, i64>(2)?),
+            ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<HashMap<_, _>>>()?)
+    }
+
+    /// A **Provider** that no longer exists has curated nothing. Callers reach
+    /// here while tearing one down, and that is not an error worth raising.
+    fn regions_curated(&self, provider_id: i64) -> Result<bool> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT regions_curated FROM providers WHERE id = ?1",
+                [provider_id],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?
+            .is_some_and(|v| v != 0))
+    }
+
+    /// Shows or hides a **Region**.
+    ///
+    /// The first call materialises a row for every Region currently known, so
+    /// that from then on "no row" unambiguously means "arrived in a later
+    /// Sync" — which is what makes hiding new Regions safe (ADR-0008).
+    pub fn set_region_visible(&self, provider_id: i64, code: &str, visible: bool) -> Result<()> {
+        self.ensure_curated(provider_id)?;
+        self.conn().execute(
+            "UPDATE region_settings SET visible = ?3
+              WHERE provider_id = ?1 AND region_code = ?2",
+            params![provider_id, code, visible as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Reorders the shown **Regions**; `codes` is the order the Viewer wants.
+    ///
+    /// Anything not named falls to the end. Without that reset, a Region the
+    /// Viewer never ordered keeps `sort_order = 0` and outranks one they
+    /// deliberately placed second.
+    pub fn set_region_order(&self, provider_id: i64, codes: &[String]) -> Result<()> {
+        self.ensure_curated(provider_id)?;
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "UPDATE region_settings SET sort_order = ?2 WHERE provider_id = ?1",
+            params![provider_id, i64::from(u32::MAX)],
+        )?;
+        for (i, code) in codes.iter().enumerate() {
+            tx.execute(
+                "UPDATE region_settings SET sort_order = ?3
+                  WHERE provider_id = ?1 AND region_code = ?2",
+                params![provider_id, code, i as i64],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn ensure_curated(&self, provider_id: i64) -> Result<()> {
+        if self.regions_curated(provider_id)? {
+            return Ok(());
+        }
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT OR IGNORE INTO region_settings (provider_id, region_code, visible, sort_order)
+             SELECT ?1, COALESCE(region_code, ?2), 1, 0
+               FROM categories WHERE provider_id = ?1
+              GROUP BY COALESCE(region_code, ?2)",
+            params![provider_id, region::OTHER],
+        )?;
+        tx.execute(
+            "UPDATE providers SET regions_curated = 1 WHERE id = ?1",
+            [provider_id],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// The **Viewer** correcting what the heuristic got wrong. Survives a Sync.
+    pub fn set_category_region(
+        &self,
+        provider_id: i64,
+        kind: CatalogueKind,
+        category_id: i64,
+        code: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn();
+        conn.execute(
+            "INSERT INTO category_region_override
+                (provider_id, catalogue_kind, category_id, region_code)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (provider_id, catalogue_kind, category_id)
+             DO UPDATE SET region_code = excluded.region_code",
+            params![provider_id, kind.as_str(), category_id, code],
+        )?;
+        conn.execute(
+            "UPDATE categories SET region_code = ?4
+              WHERE provider_id = ?1 AND kind = ?2 AND category_id = ?3",
+            params![provider_id, kind.as_str(), category_id, code],
+        )?;
+        Ok(())
+    }
+
+    /// **Regions** that appeared in the last **Sync** and were hidden on
+    /// arrival, so the Sync panel can say so rather than losing them silently.
+    pub fn new_region_count(&self, provider_id: i64) -> Result<i64> {
+        if !self.regions_curated(provider_id)? {
+            return Ok(0);
+        }
+        Ok(self.conn().query_row(
+            "SELECT COUNT(*) FROM (
+                 SELECT COALESCE(region_code, ?2) AS code
+                   FROM categories WHERE provider_id = ?1
+                  GROUP BY code
+             ) c
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM region_settings rs
+                  WHERE rs.provider_id = ?1 AND rs.region_code = c.code
+             )",
+            params![provider_id, region::OTHER],
+            |r| r.get(0),
+        )?)
     }
 
     pub fn channels(
@@ -305,15 +588,24 @@ impl Db {
         if cleaned.is_empty() {
             return Ok(Vec::new());
         }
+        let curated = self.regions_curated(provider_id)?;
         let conn = self.conn();
+        // Hidden Regions are hidden here too, not just in the rail: search is
+        // where 15k Channels hurt most.
         let mut stmt = conn.prepare(
             "SELECT kind, ref_id, name
              FROM playables_fts
              WHERE playables_fts MATCH ?2 AND provider_id = ?1
+               AND (?4 = 0 OR EXISTS (
+                     SELECT 1 FROM region_settings rs
+                      WHERE rs.provider_id = ?1
+                        AND rs.region_code = playables_fts.region_code
+                        AND rs.visible = 1
+                   ))
              ORDER BY rank
              LIMIT ?3",
         )?;
-        let rows = stmt.query_map(params![provider_id, cleaned, limit], |r| {
+        let rows = stmt.query_map(params![provider_id, cleaned, limit, curated as i64], |r| {
             Ok(SearchHit {
                 kind: r.get(0)?,
                 ref_id: r.get(1)?,
@@ -623,7 +915,7 @@ impl Db {
             }
         }
 
-        items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        items.sort_by_key(|i| std::cmp::Reverse(i.updated_at));
         items.truncate(limit as usize);
         Ok(items)
     }
@@ -747,6 +1039,22 @@ impl Db {
 
     /// The current name of whatever a ref points at, for the snapshot.
     fn name_of(&self, conn: &Connection, r: &FavouriteRef) -> Result<Option<String>> {
+        // A Category ref carries a pair packed into one string, so it cannot
+        // share the single-id lookup the others use.
+        if r.kind == FavouriteKind::Category {
+            let Some((kind, id)) = decode_category_ref(&r.ref_id) else {
+                return Ok(None);
+            };
+            return Ok(conn
+                .query_row(
+                    "SELECT name FROM categories
+                      WHERE provider_id = ?1 AND kind = ?2 AND category_id = ?3",
+                    params![r.provider_id, kind.as_str(), id],
+                    |row| row.get(0),
+                )
+                .optional()?);
+        }
+
         let sql = match r.kind {
             FavouriteKind::Channel => {
                 "SELECT name FROM channels WHERE provider_id = ?1 AND CAST(stream_id AS TEXT) = ?2"
@@ -760,6 +1068,7 @@ impl Db {
             FavouriteKind::Series => {
                 "SELECT name FROM series WHERE provider_id = ?1 AND CAST(series_id AS TEXT) = ?2"
             }
+            FavouriteKind::Category => unreachable!("handled above"),
         };
         Ok(conn
             .query_row(sql, params![r.provider_id, r.ref_id], |row| row.get(0))
@@ -829,19 +1138,46 @@ impl Db {
             [provider_id],
         )?;
 
+        let mut region_by_category: HashMap<(&str, i64), String> = HashMap::new();
         {
             let mut cat = tx.prepare(
-                "INSERT OR REPLACE INTO categories (provider_id, kind, category_id, name)
-                 VALUES (?1, ?2, ?3, ?4)",
+                "INSERT OR REPLACE INTO categories
+                    (provider_id, kind, category_id, name, region_code)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )?;
+            let mut override_lookup = tx.prepare(
+                "SELECT region_code FROM category_region_override
+                  WHERE provider_id = ?1 AND catalogue_kind = ?2 AND category_id = ?3",
             )?;
             for (kind, id, name) in &batch.categories {
-                cat.execute(params![provider_id, kind.as_str(), id, name])?;
+                // A Viewer's correction outranks the heuristic and outlives the
+                // wipe above, which is why it lives in its own table.
+                let overridden: Option<Option<String>> = override_lookup
+                    .query_row(params![provider_id, kind.as_str(), id], |r| r.get(0))
+                    .optional()?;
+                let region = match overridden {
+                    Some(Some(code)) => code,
+                    // An override explicitly cleared still means Other.
+                    Some(None) => region::OTHER.to_string(),
+                    None => region::region_for_category(name)
+                        .unwrap_or(region::OTHER)
+                        .to_string(),
+                };
+                cat.execute(params![provider_id, kind.as_str(), id, name, &region])?;
+                region_by_category.insert((kind.as_str(), *id), region);
             }
 
             let mut fts = tx.prepare(
-                "INSERT INTO playables_fts (name, provider_id, kind, ref_id)
-                 VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO playables_fts (name, provider_id, kind, ref_id, region_code)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
             )?;
+            // Denormalised onto the index so a hidden Region drops out of
+            // search with one lookup instead of a join per hit.
+            let region_of = |kind: &str, category_id: Option<i64>| -> String {
+                category_id
+                    .and_then(|id| region_by_category.get(&(kind, id)).cloned())
+                    .unwrap_or_else(|| region::OTHER.to_string())
+            };
 
             let mut ch = tx.prepare(
                 "INSERT OR REPLACE INTO channels
@@ -864,7 +1200,8 @@ impl Db {
                     c.name,
                     provider_id,
                     "channel",
-                    c.stream_id.to_string()
+                    c.stream_id.to_string(),
+                    region_of("live", c.category_id)
                 ])?;
             }
 
@@ -889,7 +1226,8 @@ impl Db {
                     m.name,
                     provider_id,
                     "movie",
-                    m.stream_id.to_string()
+                    m.stream_id.to_string(),
+                    region_of("movie", m.category_id)
                 ])?;
             }
 
@@ -914,12 +1252,17 @@ impl Db {
                     s.name,
                     provider_id,
                     "series",
-                    s.series_id.to_string()
+                    s.series_id.to_string(),
+                    region_of("series", s.category_id)
                 ])?;
             }
         }
 
-        reconcile_refs(&tx, provider_id, &["channel", "movie", "series"])?;
+        reconcile_refs(
+            &tx,
+            provider_id,
+            &["channel", "movie", "series", "category"],
+        )?;
 
         tx.commit()?;
         Ok(())
@@ -988,6 +1331,33 @@ fn reconcile_refs(
     let mut dropped = 0;
 
     for kind in kinds {
+        if *kind == "category" {
+            // The ref packs catalogue-kind and id together, so the join is on
+            // the encoded string rather than a bare column.
+            dropped += tx.execute(
+                "DELETE FROM favourites
+                  WHERE provider_id = ?1 AND kind = 'category'
+                    AND NOT EXISTS (
+                        SELECT 1 FROM categories c
+                         WHERE c.provider_id = favourites.provider_id
+                           AND c.kind || ':' || c.category_id = favourites.ref_id
+                           AND (favourites.name_snapshot IS NULL
+                                OR c.name = favourites.name_snapshot)
+                    )",
+                [provider_id],
+            )?;
+            tx.execute(
+                "UPDATE favourites SET name_snapshot = (
+                     SELECT c.name FROM categories c
+                      WHERE c.provider_id = favourites.provider_id
+                        AND c.kind || ':' || c.category_id = favourites.ref_id
+                 )
+                  WHERE provider_id = ?1 AND kind = 'category'",
+                [provider_id],
+            )?;
+            continue;
+        }
+
         let (table, id_expr, name_col) = match *kind {
             "channel" => ("channels", "CAST(t.stream_id AS TEXT)", "t.name"),
             "movie" => ("movies", "CAST(t.stream_id AS TEXT)", "t.name"),
@@ -1043,6 +1413,38 @@ pub struct CatalogueBatch {
     pub channels: Vec<Channel>,
     pub movies: Vec<Movie>,
     pub series: Vec<Series>,
+}
+
+/// Before the **Viewer** curates, everything shows. After, only Regions they
+/// kept — a missing row means the Region arrived later (ADR-0008).
+fn is_region_visible(settings: &HashMap<String, (bool, i64)>, code: &str, curated: bool) -> bool {
+    match settings.get(code) {
+        Some((visible, _)) => *visible,
+        None => !curated,
+    }
+}
+
+/// `Other` sorts last whatever else happens; it is the leftovers bucket.
+fn other_last(code: &str) -> u8 {
+    u8::from(code == region::OTHER)
+}
+
+fn sort_categories(items: &mut [Category], settings: &HashMap<String, (bool, i64)>) {
+    items.sort_by(|a, b| {
+        let order = |c: &Category| {
+            settings
+                .get(&c.region_code)
+                .map(|s| s.1)
+                .unwrap_or(i64::MAX)
+        };
+        order(a)
+            .cmp(&order(b))
+            .then_with(|| other_last(&a.region_code).cmp(&other_last(&b.region_code)))
+            .then_with(|| a.region_label.cmp(&b.region_label))
+            // Favourites first within their Region, then alphabetical.
+            .then_with(|| b.is_favourite.cmp(&a.is_favourite))
+            .then_with(|| a.name.cmp(&b.name))
+    });
 }
 
 pub fn now() -> i64 {
@@ -1423,5 +1825,130 @@ mod tests {
         let cats = db.categories(id, CatalogueKind::Live).unwrap();
         assert_eq!(cats.len(), 1);
         assert_eq!(cats[0].count, 1);
+    }
+
+    // ---- Regions (ADR-0008) ---------------------------------------------
+
+    fn with_regions(db: &Db, id: i64) {
+        db.replace_catalogue(
+            id,
+            CatalogueBatch {
+                categories: vec![
+                    (CatalogueKind::Live, 1, "ES - FUTBOL".into()),
+                    (CatalogueKind::Live, 2, "ES - CINE".into()),
+                    (CatalogueKind::Live, 3, "UK - SPORTS".into()),
+                    (CatalogueKind::Live, 4, "NBA".into()),
+                ],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn categories_are_tagged_with_a_region_at_sync() {
+        let (db, id) = seeded();
+        with_regions(&db, id);
+        let cats = db.categories(id, CatalogueKind::Live).unwrap();
+        let by_name = |n: &str| cats.iter().find(|c| c.name == n).unwrap();
+        assert_eq!(by_name("ES - FUTBOL").region_code, "ES");
+        assert_eq!(by_name("UK - SPORTS").region_code, "GB");
+        assert_eq!(by_name("NBA").region_code, region::OTHER);
+        assert_eq!(by_name("NBA").region_label, "Other");
+    }
+
+    #[test]
+    fn everything_is_visible_before_the_viewer_curates() {
+        let (db, id) = seeded();
+        with_regions(&db, id);
+        assert_eq!(db.categories(id, CatalogueKind::Live).unwrap().len(), 4);
+        assert!(db.regions(id).unwrap().iter().all(|r| r.visible));
+    }
+
+    #[test]
+    fn hiding_a_region_removes_its_categories_from_the_rail() {
+        let (db, id) = seeded();
+        with_regions(&db, id);
+        db.set_region_visible(id, "GB", false).unwrap();
+        let names: Vec<_> = db
+            .categories(id, CatalogueKind::Live)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        assert!(!names.contains(&"UK - SPORTS".to_string()));
+        assert!(names.contains(&"ES - FUTBOL".to_string()));
+    }
+
+    #[test]
+    fn a_region_new_since_curation_arrives_hidden_and_is_counted() {
+        let (db, id) = seeded();
+        with_regions(&db, id);
+        db.set_region_visible(id, "GB", false).unwrap(); // curates
+
+        // A later Sync introduces Italy.
+        db.replace_catalogue(
+            id,
+            CatalogueBatch {
+                categories: vec![
+                    (CatalogueKind::Live, 1, "ES - FUTBOL".into()),
+                    (CatalogueKind::Live, 9, "IT - SKY ITALIA".into()),
+                ],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let names: Vec<_> = db
+            .categories(id, CatalogueKind::Live)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        assert!(
+            !names.contains(&"IT - SKY ITALIA".to_string()),
+            "a Region new since curation must not reappear on its own"
+        );
+        assert_eq!(db.new_region_count(id).unwrap(), 1, "and must be reported");
+    }
+
+    #[test]
+    fn favourite_categories_come_first_within_their_region() {
+        let (db, id) = seeded();
+        with_regions(&db, id);
+        db.set_region_order(id, &["ES".into(), "GB".into()])
+            .unwrap();
+        db.toggle_favourite(&fav(id, FavouriteKind::Category, "live:2"))
+            .unwrap(); // ES - CINE
+
+        let names: Vec<_> = db
+            .categories(id, CatalogueKind::Live)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        // ES first because ordered so; CINE before FUTBOL because starred,
+        // despite being second alphabetically. Other last.
+        assert_eq!(
+            names,
+            vec!["ES - CINE", "ES - FUTBOL", "UK - SPORTS", "NBA"]
+        );
+    }
+
+    #[test]
+    fn a_viewer_override_survives_a_sync() {
+        let (db, id) = seeded();
+        with_regions(&db, id);
+        db.set_category_region(id, CatalogueKind::Live, 4, Some("US"))
+            .unwrap(); // NBA is American, actually
+
+        with_regions(&db, id); // full re-Sync wipes and rewrites categories
+
+        let cats = db.categories(id, CatalogueKind::Live).unwrap();
+        let nba = cats.iter().find(|c| c.name == "NBA").unwrap();
+        assert_eq!(
+            nba.region_code, "US",
+            "the correction must outlive the wipe"
+        );
     }
 }

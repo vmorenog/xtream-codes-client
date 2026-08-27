@@ -3,6 +3,7 @@ mod credentials;
 mod db;
 mod error;
 mod player;
+mod region;
 mod sync;
 mod xtream;
 
@@ -49,6 +50,11 @@ pub fn run() {
             commands::save_watch_state,
             commands::mark_watched,
             commands::clear_watch_state,
+            commands::regions,
+            commands::set_region_visible,
+            commands::set_region_order,
+            commands::set_category_region,
+            commands::toggle_category_favourite,
             commands::favourites,
             commands::continue_watching,
             commands::play,

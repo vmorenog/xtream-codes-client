@@ -17,9 +17,16 @@ Measured on a real catalogue:
 
 So the **Region** is resolved per Category at **Sync** time, in two passes: a
 code table for the prefixed ones (with `UK` and `GB` both mapping to the United
-Kingdom), then a country-name lookup for the bare ones. Whatever is left has no
-Region and the **Viewer** can set it by hand. A Channel's Region is simply its
-Category's — Channels are never parsed.
+Kingdom), then a name lookup for the rest — bare countries (`HOLLAND`), word
+prefixes (`LAT -`, `Polska -`) and language groupings (`ENGLISH -`, `ESPAÑA -`).
+A Channel's Region is simply its Category's; Channels are never parsed.
+
+Measured against the same real catalogue, this tags **309 of 319 Categories
+(97%)**. The ten left over are correct to leave untagged — `ADULTS`, `MLB`,
+`NBA`, `NFL`, `PEACOCK`, `PPV - SPORT`, `SPFL Championship`, `SPFL PREMIERSHIP`,
+`MLS`, `No Category` — none of them is a place. They land in **Other**, a real
+Region bucket rather than a null, so every Category has exactly one Region to be
+filtered and ordered by.
 
 The term is **Region**, not language: the same field holds `ES` (a country),
 `ARABIC` (a language) and `EX-YU` (a defunct state). Providers conflate them and
@@ -49,4 +56,8 @@ before it has been downloaded at least once.
   vanishes without a count saying it happened. Before any curation, everything
   shows.
 - The code table is data we now maintain. It will need entries as Providers
-  invent codes.
+  invent codes. Two of its entries exist purely because a Provider misspells a
+  country (`COLUMBIA`, `HUNGARIA`); recognising their spelling is the job, not
+  correcting it.
+- Upgrading an existing database backfills Regions on open and rebuilds the
+  search index, so it works before the next Sync rather than after it.

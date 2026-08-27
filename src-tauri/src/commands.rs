@@ -9,7 +9,8 @@ use crate::db::model::*;
 use crate::db::Db;
 use crate::error::{AppError, Result};
 use crate::player::{Player, PlayerStatus};
-use crate::xtream::{CatalogueKind, XtreamClient};
+use crate::sync::SyncReport;
+use crate::xtream::{encode_category_ref, CatalogueKind, XtreamClient};
 use crate::{credentials, sync};
 
 pub struct AppState {
@@ -83,19 +84,28 @@ pub async fn provider_sync(
     app: AppHandle,
     state: State<'_, AppState>,
     provider_id: i64,
-) -> Result<CatalogueCounts> {
+) -> Result<SyncReport> {
     let client = client_for(&state, provider_id)?;
-    let batch = sync::sync_catalogue(&app, &state.db, &client, provider_id).await?;
+    let (batch, dividers_dropped) =
+        sync::sync_catalogue(&app, &state.db, &client, provider_id).await?;
 
-    let counts = CatalogueCounts {
-        channels: batch.channels.len() as i64,
-        movies: batch.movies.len() as i64,
-        series: batch.series.len() as i64,
-    };
+    let (channels, movies, series) = (
+        batch.channels.len() as i64,
+        batch.movies.len() as i64,
+        batch.series.len() as i64,
+    );
 
     state.db.replace_catalogue(provider_id, batch)?;
     state.db.mark_synced(provider_id)?;
-    Ok(counts)
+
+    Ok(SyncReport {
+        channels,
+        movies,
+        series,
+        dividers_dropped,
+        // Counted after the write, since the Regions come from what just landed.
+        new_regions: state.db.new_region_count(provider_id)?,
+    })
 }
 
 // ---- Catalogue -----------------------------------------------------------
@@ -244,6 +254,65 @@ pub fn mark_watched(state: State<'_, AppState>, playable: PlayableRef) -> Result
 #[tauri::command]
 pub fn clear_watch_state(state: State<'_, AppState>, playable: PlayableRef) -> Result<()> {
     state.db.clear_watch_state(&playable)
+}
+
+// ---- Regions -------------------------------------------------------------
+
+#[tauri::command]
+pub fn regions(state: State<'_, AppState>, provider_id: i64) -> Result<Vec<Region>> {
+    state.db.regions(provider_id)
+}
+
+#[tauri::command]
+pub fn set_region_visible(
+    state: State<'_, AppState>,
+    provider_id: i64,
+    code: String,
+    visible: bool,
+) -> Result<()> {
+    state.db.set_region_visible(provider_id, &code, visible)
+}
+
+/// `codes` is the order the **Viewer** wants, top first.
+#[tauri::command]
+pub fn set_region_order(
+    state: State<'_, AppState>,
+    provider_id: i64,
+    codes: Vec<String>,
+) -> Result<()> {
+    state.db.set_region_order(provider_id, &codes)
+}
+
+/// Corrects a **Region** the heuristic got wrong. `code` of `None` clears it.
+#[tauri::command]
+pub fn set_category_region(
+    state: State<'_, AppState>,
+    provider_id: i64,
+    kind: CatalogueKind,
+    category_id: i64,
+    code: Option<String>,
+) -> Result<()> {
+    state
+        .db
+        .set_category_region(provider_id, kind, category_id, code.as_deref())
+}
+
+/// Stars a **Category**, which floats it to the top of its **Region**.
+///
+/// Takes the pair rather than a ref string so the `"live:42"` encoding never
+/// leaves Rust.
+#[tauri::command]
+pub fn toggle_category_favourite(
+    state: State<'_, AppState>,
+    provider_id: i64,
+    kind: CatalogueKind,
+    category_id: i64,
+) -> Result<bool> {
+    state.db.toggle_favourite(&FavouriteRef {
+        provider_id,
+        kind: crate::xtream::FavouriteKind::Category,
+        ref_id: encode_category_ref(kind, category_id),
+    })
 }
 
 // ---- Home ----------------------------------------------------------------

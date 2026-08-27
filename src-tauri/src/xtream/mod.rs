@@ -88,6 +88,7 @@ pub enum FavouriteKind {
     Movie,
     Episode,
     Series,
+    Category,
 }
 
 impl FavouriteKind {
@@ -97,6 +98,49 @@ impl FavouriteKind {
             FavouriteKind::Movie => "movie",
             FavouriteKind::Episode => "episode",
             FavouriteKind::Series => "series",
+            FavouriteKind::Category => "category",
         }
+    }
+}
+
+/// A **Category** is identified by a pair — which part of the **Catalogue** it
+/// belongs to, plus its id — but a **Favourite** stores one string. These two
+/// are the only places that encoding is allowed to exist.
+pub fn encode_category_ref(kind: CatalogueKind, category_id: i64) -> String {
+    format!("{}:{}", kind.as_str(), category_id)
+}
+
+pub fn decode_category_ref(ref_id: &str) -> Option<(CatalogueKind, i64)> {
+    let (kind, id) = ref_id.split_once(':')?;
+    let kind = match kind {
+        "live" => CatalogueKind::Live,
+        "movie" => CatalogueKind::Movie,
+        "series" => CatalogueKind::Series,
+        _ => return None,
+    };
+    Some((kind, id.parse().ok()?))
+}
+
+#[cfg(test)]
+mod ref_tests {
+    use super::*;
+
+    #[test]
+    fn category_refs_round_trip() {
+        for kind in [
+            CatalogueKind::Live,
+            CatalogueKind::Movie,
+            CatalogueKind::Series,
+        ] {
+            let encoded = encode_category_ref(kind, 42);
+            assert_eq!(decode_category_ref(&encoded), Some((kind, 42)));
+        }
+    }
+
+    #[test]
+    fn a_malformed_category_ref_decodes_to_nothing() {
+        assert_eq!(decode_category_ref("42"), None);
+        assert_eq!(decode_category_ref("bogus:42"), None);
+        assert_eq!(decode_category_ref("live:not-a-number"), None);
     }
 }

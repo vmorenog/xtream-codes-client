@@ -1,7 +1,15 @@
 import { listen } from "@tauri-apps/api/event";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate } from "@tanstack/react-router";
-import { Clapperboard, Film, House, RefreshCw, Search, Tv } from "lucide-react";
+import {
+  Clapperboard,
+  Film,
+  House,
+  RefreshCw,
+  Search,
+  SlidersHorizontal,
+  Tv,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -21,6 +29,7 @@ const SECTIONS = [
   { to: "/live", label: "Live TV", icon: Tv },
   { to: "/movies", label: "Movies", icon: Film },
   { to: "/series", label: "Series", icon: Clapperboard },
+  { to: "/settings", label: "Settings", icon: SlidersHorizontal },
 ] as const;
 
 /** Nudge the Viewer once the mirror is this old (ADR-0004). */
@@ -125,6 +134,8 @@ function SyncPanel({ provider }: { provider: Provider }) {
     },
   });
 
+  const report = sync.data;
+
   const stale = daysSince(provider.lastSyncedAt);
   const isStale = stale === null || stale >= STALE_AFTER_DAYS;
 
@@ -134,6 +145,28 @@ function SyncPanel({ provider }: { provider: Provider }) {
         <p className="text-xs text-[var(--destructive)]">
           {errorMessage(sync.error)}
         </p>
+      ) : report ? (
+        <div className="space-y-1">
+          <Muted className="text-xs">
+            {report.channels.toLocaleString()} channels
+          </Muted>
+          {/* Both of these are deliberate removals, so they are stated rather
+              than left for you to notice a count looking wrong. */}
+          {report.dividersDropped > 0 ? (
+            <Muted className="text-xs">
+              {report.dividersDropped} separator rows dropped
+            </Muted>
+          ) : null}
+          {report.newRegions > 0 ? (
+            <Link
+              to="/settings"
+              className="block text-xs text-[var(--primary)] underline-offset-2 hover:underline"
+            >
+              {report.newRegions} new{" "}
+              {report.newRegions === 1 ? "region" : "regions"}, hidden
+            </Link>
+          ) : null}
+        </div>
       ) : isStale ? (
         <Muted className="text-xs">
           {stale === null
