@@ -1,0 +1,35 @@
+[package]
+name = "xtream-codes-client"
+version = "0.1.0"
+description = "IPTV client for Xtream Codes providers"
+authors = ["Victor Moreno"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "xtream_client_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+keyring = { version = "3.6.3", features = ["apple-native"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "process", "net", "io-util", "time", "sync"] }
+thiserror = "2.0.20"
+base64 = "0.23.1"
+url = "2.5.8"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+reqwest = { version = "0.13.3", default-features = false, features = ["json", "rustls", "http2", "charset", "gzip"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

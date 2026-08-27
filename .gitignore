@@ -6,29 +6,24 @@
 *.key
 secrets/
 
-# Local media / playlist dumps
+# Local media / playlist dumps.
+# Note: NOT `*.ts`. MPEG transport streams share that extension with
+# TypeScript, and ignoring it would silently hide vite.config.ts. Anything
+# actually captured from a provider goes in media/.
+media/
 *.m3u
 *.m3u8
-*.ts
 *.mp4
 *.mkv
-!src/**/*.ts
 
-# Dependencies & build output (stack-agnostic catch-all)
+# Dependencies & build output
 node_modules/
 dist/
-build/
-out/
-target/
-.venv/
-venv/
-__pycache__/
-*.pyc
+src-tauri/target/
+src-tauri/gen/schemas/
 
 # Caches
 .cache/
-.turbo/
-.parcel-cache/
 coverage/
 *.log
 

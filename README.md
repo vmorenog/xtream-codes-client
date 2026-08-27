@@ -3,7 +3,9 @@
 A personal macOS client for watching IPTV served over the Xtream Codes API —
 live TV, movies and series, with no ads and nothing between you and the picture.
 
-> **Status:** stack decided, not yet scaffolded. See [`docs/adr/`](docs/adr/).
+> **Status:** scaffolded and building. Catalogue browsing, search, favourites,
+> resume and mpv playback are wired end to end; nothing has been tested against
+> a real provider yet.
 
 ## Stack
 
@@ -41,8 +43,38 @@ anything you can hit play on. Read it before writing code — it is short.
 
 ## Getting started
 
-Not scaffolded yet. This section gets install/run/test commands once
-`npm create tauri-app` has been run.
+```sh
+brew install mpv          # required at runtime, not bundled
+pnpm install
+pnpm app                  # tauri dev — Vite + the Rust shell
+```
+
+Other commands:
+
+```sh
+pnpm typecheck                        # tsc --noEmit
+pnpm build                            # frontend bundle only
+pnpm app:build                        # release .app + .dmg
+cd src-tauri && cargo test --lib      # Rust unit tests
+cd src-tauri && cargo clippy --all-targets
+```
+
+Set `XTREAM_LOG=xtream_client_lib=debug` for verbose Rust logs. Nothing logged
+ever contains a **Stream URL**.
+
+## Layout
+
+```
+src/                    React webview — no network, no filesystem, no player
+  lib/api.ts            the entire Rust bridge, typed
+  components/           shell, catalogue, player bar, setup
+src-tauri/src/
+  xtream/               HTTP client + lenient wire deserializers
+  db/                   SQLite mirror, schema, queries
+  player/mpv.rs         sidecar spawn + JSON IPC
+  sync.rs               Catalogue refresh
+  commands.rs           everything the webview may call
+```
 
 ## Credentials
 

@@ -12,9 +12,31 @@ The decisions and the rejected alternatives are in [`docs/adr/`](docs/adr/).
 Read ADR-0002 and ADR-0004 before touching playback or sync — both look wrong
 until you know why.
 
-Nothing is scaffolded yet. Do not add a dependency that carries lock-in
-(database, state library, player) without asking first; when one is added,
-record it as an ADR.
+Do not add a dependency that carries lock-in (database, state library, player)
+without asking first; when one is added, record it as an ADR.
+
+## Where things live
+
+```
+src/lib/api.ts          the ONLY bridge to Rust. Types are hand-kept in step
+                        with the Serialize impls in src-tauri/src/db/model.rs —
+                        change one, change the other.
+src-tauri/src/xtream/   HTTP client; de.rs holds the lenient deserializers
+src-tauri/src/db/       SQLite mirror. schema.rs migrations are append-only.
+src-tauri/src/player/   mpv sidecar over a Unix socket
+src-tauri/src/commands.rs   every capability the webview has
+```
+
+The webview has no network, filesystem or process permissions — see
+`src-tauri/capabilities/default.json`. Adding a frontend capability means
+adding a Rust command, not widening that file.
+
+## Checks
+
+```sh
+pnpm typecheck && pnpm build
+cd src-tauri && cargo clippy --all-targets -- -D warnings && cargo test --lib
+```
 
 ## Hard rules
 
@@ -44,6 +66,11 @@ Xtream Codes exposes a small JSON API plus direct stream paths — see
   ADR-0003.
 - **Video does not render in the webview.** It is a separate mpv process.
   ADR-0002.
+- **`*.ts` is not in `.gitignore`.** MPEG transport streams share the extension
+  with TypeScript; ignoring it would hide `vite.config.ts`. Captured media goes
+  in `media/`.
+- **A Channel cannot have a Resume Point.** The SQL CHECK constraint enforces
+  it. Live has no beginning to return to.
 
 ## Conventions
 

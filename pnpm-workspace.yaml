@@ -1,0 +1,4 @@
+# esbuild's postinstall fetches its platform binary; Vite will not start
+# without it. Nothing else in the tree may run install scripts.
+allowBuilds:
+  esbuild: true

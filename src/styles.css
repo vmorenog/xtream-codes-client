@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+/* shadcn/ui token contract, so `pnpm dlx shadcn@latest add <x>` drops in
+   without a theme fight. Dark is the default — this is a night-time app. */
+@layer base {
+  :root {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.185 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.185 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.72 0.16 55);
+    --primary-foreground: oklch(0.16 0.02 55);
+    --secondary: oklch(0.24 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.24 0 0);
+    --muted-foreground: oklch(0.66 0 0);
+    --accent: oklch(0.27 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.58 0.21 27);
+    --destructive-foreground: oklch(0.985 0 0);
+    --border: oklch(0.27 0 0);
+    --input: oklch(0.27 0 0);
+    --ring: oklch(0.72 0.16 55);
+    --radius: 0.625rem;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: ui-sans-serif, -apple-system, "SF Pro Text", system-ui, sans-serif;
+    /* The window uses an overlay title bar; nothing here should rubber-band. */
+    overscroll-behavior: none;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* The app is a browser, not a document. Selecting label text is noise. */
+  body {
+    user-select: none;
+    cursor: default;
+  }
+  input,
+  textarea {
+    user-select: text;
+  }
+}
+
+/* Room for the traffic lights, which float over the content. */
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
