@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  # So a broken release can be retried without inventing a new tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build, e.g. v0.2.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Resolve version from the tag
+        id: version
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # Universal binaries need both slices; the runner only has its own.
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # The tag is the single source of truth. Both manifests are written from
+      # it so a release can never ship a version that disagrees with its tag.
+      - name: Stamp the version
+        run: |
+          V="${{ steps.version.outputs.version }}"
+          node -e "
+            const fs = require('fs');
+            const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            p.version = process.env.V;
+            fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
+          "
+          perl -0pi -e "s/^version = \".*?\"/version = \"$V\"/m" src-tauri/Cargo.toml
+        env:
+          V: ${{ steps.version.outputs.version }}
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the universal app
+        run: pnpm tauri build --target universal-apple-darwin
+
+      - name: Name the artifact
+        id: artifact
+        run: |
+          V="${{ steps.version.outputs.version }}"
+          SRC=$(find src-tauri/target/universal-apple-darwin/release/bundle/dmg -name '*.dmg' | head -1)
+          test -n "$SRC" || { echo "no .dmg was produced"; exit 1; }
+          OUT="Xtream-$V-universal.dmg"
+          mv "$SRC" "$OUT"
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+          echo "sha=$(shasum -a 256 "$OUT" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          files: ${{ steps.artifact.outputs.path }}
+          generate_release_notes: true
+          body: |
+            ```sh
+            brew install --cask --no-quarantine vmorenog/tap/xtream
+            ```
+
+            `--no-quarantine` is required: the app is not signed by Apple, and
+            Homebrew quarantines casks by default. See ADR-0009.
+
+            Requires mpv, which the cask installs for you.
+
+      # Homebrew is the update path, so the cask has to move in lockstep with
+      # the release or `brew upgrade` silently offers nothing.
+      - name: Bump the cask
+        env:
+          GH_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          test -n "$GH_TOKEN" || { echo "TAP_TOKEN is not set; skipping cask bump"; exit 0; }
+          V="${{ steps.version.outputs.version }}"
+          SHA="${{ steps.artifact.outputs.sha }}"
+          git clone "https://x-access-token:$GH_TOKEN@github.com/vmorenog/homebrew-tap.git" tap
+          mkdir -p tap/Casks
+          sed -e "s/@VERSION@/$V/g" -e "s/@SHA256@/$SHA/g" packaging/xtream.rb.tmpl > tap/Casks/xtream.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/xtream.rb
+          git commit -m "xtream $V"
+          git push

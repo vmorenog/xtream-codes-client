@@ -86,6 +86,15 @@ Xtream Codes exposes a small JSON API plus direct stream paths — see
 - **"Pin", "channel group" and "language" are banned words.** They are
   **Favourite**, **Category** and **Region**. See CONTEXT.md.
 
+## Releasing
+
+`git tag vX.Y.Z && git push --tags`. The tag is the only place a version is
+written by hand: CI stamps it into `package.json` and `Cargo.toml`, and
+`tauri.conf.json` reads `"../package.json"`. Never bump a version in a manifest
+directly — it will be overwritten.
+
+The repo is public. Nothing may log or commit a provider hostname (ADR-0009).
+
 ## Conventions
 
 - Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`).

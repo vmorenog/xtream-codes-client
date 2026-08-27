@@ -42,12 +42,25 @@ anything you can hit play on. Read it before writing code — it is short.
   you choose to. This is deliberate — see
   [ADR-0004](docs/adr/0004-sqlite-mirror-with-manual-sync.md)
 
+## Install
+
+```sh
+brew install --cask --no-quarantine vmorenog/tap/xtream
+```
+
+**`--no-quarantine` is not optional.** The app is not signed by Apple, and
+Homebrew quarantines casks by default, so without it macOS refuses to open the
+app with no useful explanation. The cask installs mpv for you.
+See [ADR-0009](docs/adr/0009-distribution-via-an-unsigned-homebrew-cask.md).
+
+Updates come through `brew upgrade --cask xtream`.
+
 ## Requirements
 
-- macOS (Apple Silicon or Intel)
-- `brew install mpv` — the app detects it and will not play without it
+- macOS 11 or later, Apple Silicon or Intel — releases are universal binaries
+- mpv, which the cask installs
   ([ADR-0003](docs/adr/0003-mpv-is-a-system-dependency.md))
-- Rust toolchain + Node for building
+- For building from source: the Rust toolchain and Node 24
 
 ## Getting started
 
@@ -58,6 +71,19 @@ brew install mpv          # required at runtime, not bundled
 pnpm install
 pnpm app                  # tauri dev — Vite + the Rust shell
 ```
+
+## Releasing
+
+Tag and push; everything else is CI.
+
+```sh
+git tag v0.2.0 && git push --tags
+```
+
+The tag is the single source of truth for the version: the workflow writes it
+into `package.json` and `Cargo.toml`, builds a universal `.dmg`, publishes the
+GitHub release, and bumps the cask in the tap. `tauri.conf.json` reads its
+version from `package.json`, so there is nothing to keep in step by hand.
 
 Other commands:
 
@@ -97,8 +123,13 @@ Xtream **Stream URLs** embed the username and password in the path
 
 ## Legal
 
-This is a *client*. It ships no content and no credentials. You are responsible
-for holding a legitimate subscription to anything you point it at.
+This is a *client*. It ships no content and no credentials, and no provider is
+named anywhere in it. You are responsible for holding a legitimate subscription
+to anything you point it at.
+
+Because this repository is public, please keep provider hostnames out of issues,
+logs and screenshots. Nothing in the app logs a **Stream URL**, but a pasted
+config can undo that.
 
 ## License
 
