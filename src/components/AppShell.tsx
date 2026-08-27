@@ -11,6 +11,7 @@ import {
   type Provider,
   type SyncProgress,
 } from "@/lib/api";
+import { useApp } from "@/lib/app-context";
 import { cn, daysSince, formatDate } from "@/lib/utils";
 import { Button, Input, Muted } from "@/components/ui";
 import { PlayerBar } from "@/components/PlayerBar";
@@ -29,20 +30,18 @@ export function AppShell({
   active,
   setActive,
   nowPlaying,
-  setNowPlaying,
 }: {
   providers: Provider[];
   active: Provider;
   setActive: (id: number) => void;
   nowPlaying: PlayableRef | null;
-  setNowPlaying: (r: PlayableRef | null) => void;
 }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex min-h-0 flex-1">
         <Sidebar providers={providers} active={active} setActive={setActive} />
         <main className="flex min-w-0 flex-1 flex-col">
-          <TopBar active={active} onPlay={setNowPlaying} />
+          <TopBar active={active} />
           <Outlet />
         </main>
       </div>
@@ -165,13 +164,8 @@ function SyncPanel({ provider }: { provider: Provider }) {
   );
 }
 
-function TopBar({
-  active,
-  onPlay,
-}: {
-  active: Provider;
-  onPlay: (r: PlayableRef) => void;
-}) {
+function TopBar({ active }: { active: Provider }) {
+  const { play } = useApp();
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<Awaited<ReturnType<typeof api.search>>>([]);
   const navigate = useNavigate();
@@ -219,7 +213,7 @@ function TopBar({
                     });
                     return;
                   }
-                  onPlay({
+                  play({
                     providerId: active.id,
                     kind: h.kind,
                     refId: h.refId,

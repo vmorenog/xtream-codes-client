@@ -45,7 +45,6 @@ export function App() {
         active={active}
         setActive={setActive}
         nowPlaying={nowPlaying}
-        setNowPlaying={setNowPlaying}
       />
     </AppContext.Provider>
   );
