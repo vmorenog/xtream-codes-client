@@ -1,0 +1,44 @@
+# Secrets — provider credentials, tokens, playlists
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Local media / playlist dumps
+*.m3u
+*.m3u8
+*.ts
+*.mp4
+*.mkv
+!src/**/*.ts
+
+# Dependencies & build output (stack-agnostic catch-all)
+node_modules/
+dist/
+build/
+out/
+target/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Caches
+.cache/
+.turbo/
+.parcel-cache/
+coverage/
+*.log
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# Claude Code local overrides
+.claude/settings.local.json
