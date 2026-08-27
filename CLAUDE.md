@@ -71,6 +71,13 @@ Xtream Codes exposes a small JSON API plus direct stream paths — see
   in `media/`.
 - **A Channel cannot have a Resume Point.** The SQL CHECK constraint enforces
   it. Live has no beginning to return to.
+- **Up Next is the lowest Unwatched Episode, not the one after the last
+  watched.** Recency looks more intuitive and is wrong: it sends you backwards
+  after a rewatch. ADR-0006 has the three cases. Do not "fix" this.
+- **Finished Playables keep their row.** Completion is recorded, not deleted —
+  deleting it is what made Up Next uncomputable. ADR-0006.
+- **Sync deletes Favourites.** Deliberately: it drops rows whose Playable has
+  vanished or been renumbered into a different one. ADR-0007.
 
 ## Conventions
 
