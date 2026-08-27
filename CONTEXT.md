@@ -87,6 +87,27 @@ How far into a **Movie** or **Episode** the **Viewer** got. **Channels** have
 no Resume Point — live has no beginning to return to.
 _Avoid_: progress, watch position, bookmark
 
+**Watched**:
+A **Movie** or **Episode** the **Viewer** finished. A **Channel** is never
+Watched — live has no end to reach.
+_Avoid_: seen, completed, played
+
+**Watch State**:
+Which of three a **Playable** is in: **Unwatched** (no record), **In Progress**
+(has a **Resume Point**), or **Watched**.
+_Avoid_: status, progress
+
+**Up Next**:
+The lowest-numbered **Unwatched Episode** of a **Series** the **Viewer** has
+started. Ordering is by season then episode number, never by when the Viewer
+last watched.
+_Avoid_: next up, continue, resume
+
+**Continue Watching**:
+The collection the **Viewer** is offered to pick up: every **In Progress**
+**Playable**, plus the **Up Next** of every started, unfinished **Series**.
+_Avoid_: recent, history, watchlist
+
 **Session**:
 One instance of a **Playable** being played. Bounded by the **Provider**'s
 simultaneous-stream cap from the **Entitlement**.
@@ -102,6 +123,9 @@ _Avoid_: connection, playback
 - A **Playable** resolves to exactly one **Stream URL**
 - A **Channel** has a **Schedule** of many **Programmes**
 - A **Movie** or **Episode** has at most one **Resume Point**; a **Channel** has none
+- A **Movie** or **Episode** holds one **Watch State**; a **Channel** holds none
+- A started **Series** has exactly one **Up Next**, or none once every **Episode** is **Watched**
+- **Continue Watching** draws from **Resume Points** and **Up Next**, never from **Favourites**
 - A **Provider** caps how many **Sessions** may run at once
 
 ## Example dialogue
@@ -119,6 +143,22 @@ _Avoid_: connection, playback
 > **Dev:** "Does a **Channel** get a **Resume Point** if I pause it?"
 > **Domain expert:** "No. Pausing a live **Channel** pauses the **Session**, but
 > there is nothing to resume to later — the broadcast moved on."
+>
+> **Dev:** "The **Viewer** watched S1E1 to E5, then rewatched E2. What is
+> **Up Next**?"
+> **Domain expert:** "E6. **Up Next** is the lowest **Unwatched** **Episode**,
+> not the one after whatever they touched last — otherwise a rewatch would send
+> them backwards through episodes they have already seen."
+>
+> **Dev:** "And if they misclick into S3E1 of something they have never seen?"
+> **Domain expert:** "**Up Next** is still S1E1. That is the whole point of
+> using the lowest **Unwatched** rather than the highest **Watched** — one bad
+> click must not strand the rest of the **Series**."
+>
+> **Dev:** "What if they deliberately skip an **Episode**?"
+> **Domain expert:** "Then it stays **Unwatched** and **Up Next** keeps offering
+> it. Marking it **Watched** by hand is how the **Viewer** says 'I meant to skip
+> that'."
 
 ## Flagged ambiguities
 
@@ -131,3 +171,8 @@ _Avoid_: connection, playback
 - **Category** could have been one shared set across all kinds. Resolved: the
   Xtream API returns separate category sets for live, VOD and series, and they
   are not interchangeable.
+- **"finished"** was used for both a **Playable** reaching its end and a
+  **Series** having no **Episodes** left. Resolved: a Playable is **Watched**; a
+  **Series** with no **Up Next** is finished, which is derived, not stored.
+- **"continue watching"** was used loosely for both the collection and the act.
+  Resolved: **Continue Watching** is the collection. The act is just playing.
