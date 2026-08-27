@@ -44,6 +44,8 @@ anything you can hit play on. Read it before writing code — it is short.
 ## Getting started
 
 ```sh
+nvm use                   # Node 24, per .nvmrc — pnpm is a corepack shim and
+                          # is installed per Node version, not globally
 brew install mpv          # required at runtime, not bundled
 pnpm install
 pnpm app                  # tauri dev — Vite + the Rust shell
