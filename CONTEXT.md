@@ -79,7 +79,9 @@ resumable, never silent on launch.
 _Avoid_: refresh, update, import, fetch
 
 **Favourite**:
-A **Playable** the **Viewer** has pinned for quick access.
+Something the **Viewer** has pinned for quick access: a **Channel**, **Movie**,
+**Episode** or **Series**. Wider than **Playable**, because a Series is worth
+pinning even though you play its Episodes rather than the Series itself.
 _Avoid_: bookmark, starred, pinned
 
 **Resume Point**:
@@ -105,7 +107,9 @@ _Avoid_: next up, continue, resume
 
 **Continue Watching**:
 The collection the **Viewer** is offered to pick up: every **In Progress**
-**Playable**, plus the **Up Next** of every started, unfinished **Series**.
+**Playable**, plus the **Up Next** of every started, unfinished **Series**. At
+most one entry per Series — an In Progress **Episode** stands in for that
+Series' Up Next rather than appearing alongside it.
 _Avoid_: recent, history, watchlist
 
 **Session**:
@@ -116,6 +120,7 @@ _Avoid_: connection, playback
 ## Relationships
 
 - A **Viewer** holds one or more **Providers**
+- A **Favourite** points at a **Channel**, **Movie**, **Episode** or **Series**
 - A **Provider** grants one **Entitlement** and offers one **Catalogue**
 - A **Catalogue** contains many **Channels**, **Movies** and **Series**
 - A **Series** contains **Seasons**, which contain **Episodes**
@@ -176,3 +181,6 @@ _Avoid_: connection, playback
   **Series** with no **Up Next** is finished, which is derived, not stored.
 - **"continue watching"** was used loosely for both the collection and the act.
   Resolved: **Continue Watching** is the collection. The act is just playing.
+- **Favourite** was first defined as a **Playable**, which excluded **Series**.
+  Resolved: a Favourite is wider than a Playable. You pin a show; you play an
+  **Episode** of it.

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Play, Star, Tv } from "lucide-react";
 import { useState } from "react";
@@ -11,6 +11,7 @@ import {
 } from "@/lib/api";
 import { cn, formatDuration } from "@/lib/utils";
 import { Button, Muted, Notice } from "@/components/ui";
+import { FavouriteToggle } from "@/components/Home";
 
 interface Props {
   providerId: number;
@@ -96,26 +97,6 @@ function CategoryButton({
   );
 }
 
-function FavouriteButton({ playable }: { playable: PlayableRef }) {
-  const qc = useQueryClient();
-  const toggle = useMutation({
-    mutationFn: () => api.toggleFavourite(playable),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [playable.kind + "s"] }),
-  });
-  return (
-    <Button
-      size="sm"
-      variant="ghost"
-      onClick={(e) => {
-        e.stopPropagation();
-        toggle.mutate();
-      }}
-    >
-      <Star className="size-4" />
-    </Button>
-  );
-}
-
 function Channels({
   providerId,
   categoryId,
@@ -176,7 +157,12 @@ function Channels({
               <Star className="size-3.5 fill-current text-[var(--primary)]" />
             ) : null}
             <div className="flex shrink-0 items-center opacity-0 group-hover:opacity-100">
-              <FavouriteButton playable={ref} />
+              <FavouriteToggle
+                providerId={providerId}
+                kind="channel"
+                refId={ref.refId}
+                active={c.isFavourite}
+              />
               <Button size="sm" variant="ghost" onClick={() => onPlay(ref)}>
                 <Play className="size-4" />
               </Button>
@@ -246,7 +232,15 @@ function Movies({
                 </div>
               ) : null}
             </div>
-            <p className="mt-2 line-clamp-2 text-xs">{m.name}</p>
+            <div className="mt-2 flex items-start gap-1">
+              <p className="line-clamp-2 flex-1 text-xs">{m.name}</p>
+              <FavouriteToggle
+                providerId={providerId}
+                kind="movie"
+                refId={ref.refId}
+                active={m.isFavourite}
+              />
+            </div>
           </button>
         );
       })}
@@ -274,27 +268,35 @@ function SeriesGrid({
   return (
     <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4 p-4">
       {q.data.map((s) => (
-        <Link
-          key={s.seriesId}
-          to="/series/$seriesId"
-          params={{ seriesId: String(s.seriesId) }}
-          className="group text-left"
-        >
-          <div className="aspect-[2/3] overflow-hidden rounded-lg bg-[var(--muted)]">
-            {s.cover ? (
-              <img
-                src={s.cover}
-                alt=""
-                loading="lazy"
-                className="size-full object-cover transition group-hover:scale-105"
-                onError={(e) => {
-                  e.currentTarget.style.visibility = "hidden";
-                }}
-              />
-            ) : null}
+        <div key={s.seriesId} className="group">
+          <Link
+            to="/series/$seriesId"
+            params={{ seriesId: String(s.seriesId) }}
+            className="block text-left"
+          >
+            <div className="aspect-[2/3] overflow-hidden rounded-lg bg-[var(--muted)]">
+              {s.cover ? (
+                <img
+                  src={s.cover}
+                  alt=""
+                  loading="lazy"
+                  className="size-full object-cover transition group-hover:scale-105"
+                  onError={(e) => {
+                    e.currentTarget.style.visibility = "hidden";
+                  }}
+                />
+              ) : null}
+            </div>
+          </Link>
+          <div className="mt-2 flex items-start gap-1">
+            <p className="line-clamp-2 flex-1 text-xs">{s.name}</p>
+            <FavouriteToggle
+              providerId={providerId}
+              kind="series"
+              refId={String(s.seriesId)}
+            />
           </div>
-          <p className="mt-2 line-clamp-2 text-xs">{s.name}</p>
-        </Link>
+        </div>
       ))}
     </div>
   );

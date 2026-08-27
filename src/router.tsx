@@ -2,11 +2,11 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
-  redirect,
 } from "@tanstack/react-router";
 
 import { App } from "@/App";
 import { Catalogue, SeriesDetail } from "@/components/Catalogue";
+import { Home } from "@/components/Home";
 import { useApp } from "@/lib/app-context";
 
 const rootRoute = createRootRoute({ component: App });
@@ -14,9 +14,7 @@ const rootRoute = createRootRoute({ component: App });
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  beforeLoad: () => {
-    throw redirect({ to: "/live" });
-  },
+  component: Home,
 });
 
 function CatalogueRoute({ kind }: { kind: "live" | "movie" | "series" }) {

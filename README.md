@@ -26,10 +26,14 @@ anything you can hit play on. Read it before writing code — it is short.
 
 ## What it does
 
+- **Home**: favourite **Channels**, then **Continue Watching**, then pinned
+  Series and Movies
 - Holds several **Providers**; every catalogue row is scoped to one
 - Browses **Channels**, **Movies** and **Series** by **Category**
 - Shows the **Schedule** (EPG) for a **Channel**
-- Plays anything via mpv, with **Favourites** and **Resume Points**
+- Plays anything via mpv, with **Favourites** and **Watch State**
+- Finishing an **Episode** advances the **Series** to its **Up Next**
+  ([ADR-0006](docs/adr/0006-watch-state-and-up-next.md))
 - **Never syncs on launch.** Opens instantly off the local mirror; you sync when
   you choose to. This is deliberate — see
   [ADR-0004](docs/adr/0004-sqlite-mirror-with-manual-sync.md)

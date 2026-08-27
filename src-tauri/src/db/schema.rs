@@ -122,6 +122,77 @@ const MIGRATIONS: &[&str] = &[
         tokenize    = "unicode61 remove_diacritics 2"
     );
     "#,
+    // 0002 — Watch State replaces Resume Points (ADR-0006), and every Viewer
+    // row carries a name snapshot so a Sync can spot a renumbered id (ADR-0007).
+    r#"
+    CREATE TABLE watch_state (
+        provider_id   INTEGER NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+        kind          TEXT    NOT NULL CHECK (kind IN ('movie','episode')),
+        ref_id        TEXT    NOT NULL,
+        state         TEXT    NOT NULL CHECK (state IN ('in_progress','watched')),
+        position_secs INTEGER,
+        duration_secs INTEGER,
+        name_snapshot TEXT,
+        updated_at    INTEGER NOT NULL,
+        PRIMARY KEY (provider_id, kind, ref_id),
+        -- A position is exactly what makes a row In Progress. Watched rows have
+        -- none: there is nothing left to return to.
+        CHECK ((state = 'in_progress') = (position_secs IS NOT NULL))
+    ) WITHOUT ROWID;
+    CREATE INDEX watch_state_recent ON watch_state(provider_id, updated_at DESC);
+
+    INSERT INTO watch_state
+        (provider_id, kind, ref_id, state, position_secs, duration_secs, updated_at)
+    SELECT provider_id, kind, ref_id, 'in_progress', position_secs, duration_secs, updated_at
+    FROM resume_points;
+
+    DROP TABLE resume_points;
+
+    -- Rebuilt rather than altered: SQLite cannot widen a CHECK in place, and a
+    -- Series is now favouritable even though it is not a Playable.
+    CREATE TABLE favourites_v2 (
+        provider_id   INTEGER NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+        kind          TEXT    NOT NULL CHECK (kind IN ('channel','movie','episode','series')),
+        ref_id        TEXT    NOT NULL,
+        name_snapshot TEXT,
+        created_at    INTEGER NOT NULL,
+        PRIMARY KEY (provider_id, kind, ref_id)
+    ) WITHOUT ROWID;
+
+    INSERT INTO favourites_v2 (provider_id, kind, ref_id, created_at)
+    SELECT provider_id, kind, ref_id, created_at FROM favourites;
+
+    DROP TABLE favourites;
+    ALTER TABLE favourites_v2 RENAME TO favourites;
+
+    -- Backfill snapshots for rows that predate them, so the first Sync after
+    -- this migration can already tell a renumber from a removal.
+    UPDATE favourites SET name_snapshot = (
+        SELECT c.name FROM channels c
+         WHERE c.provider_id = favourites.provider_id
+           AND CAST(c.stream_id AS TEXT) = favourites.ref_id
+    ) WHERE kind = 'channel';
+    UPDATE favourites SET name_snapshot = (
+        SELECT m.name FROM movies m
+         WHERE m.provider_id = favourites.provider_id
+           AND CAST(m.stream_id AS TEXT) = favourites.ref_id
+    ) WHERE kind = 'movie';
+    UPDATE favourites SET name_snapshot = (
+        SELECT e.title FROM episodes e
+         WHERE e.provider_id = favourites.provider_id
+           AND e.episode_id = favourites.ref_id
+    ) WHERE kind = 'episode';
+    UPDATE watch_state SET name_snapshot = (
+        SELECT m.name FROM movies m
+         WHERE m.provider_id = watch_state.provider_id
+           AND CAST(m.stream_id AS TEXT) = watch_state.ref_id
+    ) WHERE kind = 'movie';
+    UPDATE watch_state SET name_snapshot = (
+        SELECT e.title FROM episodes e
+         WHERE e.provider_id = watch_state.provider_id
+           AND e.episode_id = watch_state.ref_id
+    ) WHERE kind = 'episode';
+    "#,
 ];
 
 pub fn migrate(conn: &Connection) -> Result<()> {
@@ -134,8 +205,19 @@ pub fn migrate(conn: &Connection) -> Result<()> {
     let applied: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
     for (i, sql) in MIGRATIONS.iter().enumerate().skip(applied as usize) {
         tracing::info!(migration = i + 1, "applying migration");
-        conn.execute_batch(sql)?;
-        conn.pragma_update(None, "user_version", (i + 1) as i64)?;
+        // One transaction per migration. 0002 rebuilds `favourites`, and a
+        // half-applied rebuild would leave no table at all.
+        conn.execute_batch("BEGIN")?;
+        match conn.execute_batch(sql) {
+            Ok(()) => {
+                conn.pragma_update(None, "user_version", (i + 1) as i64)?;
+                conn.execute_batch("COMMIT")?;
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK");
+                return Err(e.into());
+            }
+        }
     }
     Ok(())
 }
@@ -161,12 +243,92 @@ mod tests {
         migrate(&conn).unwrap();
     }
 
+    /// Applies only the first N migrations, to stand in for an older database.
+    fn migrate_to(conn: &Connection, upto: usize) {
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        for (i, sql) in MIGRATIONS.iter().enumerate().take(upto) {
+            conn.execute_batch(sql).unwrap();
+            conn.pragma_update(None, "user_version", (i + 1) as i64)
+                .unwrap();
+        }
+    }
+
+    /// The upgrade path a real installation takes, not just a fresh install.
+    #[test]
+    fn migration_0002_carries_existing_viewer_data_across() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate_to(&conn, 1);
+
+        conn.execute_batch(
+            "INSERT INTO providers (id, name, base_url, username, created_at)
+                  VALUES (1, 'P', 'http://x', 'u', 0);
+             INSERT INTO channels (provider_id, stream_id, name, has_archive)
+                  VALUES (1, 42, 'LA 1', 0);
+             INSERT INTO movies (provider_id, stream_id, name)
+                  VALUES (1, 7, 'Amelie');
+             INSERT INTO favourites VALUES (1, 'channel', '42', 0);
+             INSERT INTO resume_points VALUES (1, 'movie', '7', 300, 6000, 0);",
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+
+        // The Favourite survived and picked up a snapshot to reconcile against.
+        let (kind, snapshot): (String, Option<String>) = conn
+            .query_row(
+                "SELECT kind, name_snapshot FROM favourites WHERE ref_id = '42'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(kind, "channel");
+        assert_eq!(snapshot.as_deref(), Some("LA 1"));
+
+        // The Resume Point became an In Progress Watch State, position intact.
+        let (state, pos, snap): (String, i64, Option<String>) = conn
+            .query_row(
+                "SELECT state, position_secs, name_snapshot FROM watch_state WHERE ref_id = '7'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(state, "in_progress");
+        assert_eq!(pos, 300);
+        assert_eq!(snap.as_deref(), Some("Amelie"));
+
+        // And a Series is now favouritable, which the old CHECK forbade.
+        conn.execute(
+            "INSERT INTO favourites VALUES (1,'series','100',NULL,0)",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_watched_row_cannot_carry_a_position() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO providers (id,name,base_url,username,created_at) VALUES (1,'P','u','u',0)",
+            [],
+        )
+        .unwrap();
+        assert!(
+            conn.execute(
+                "INSERT INTO watch_state VALUES (1,'movie','7','watched',300,NULL,NULL,0)",
+                [],
+            )
+            .is_err(),
+            "a Watched row has nothing to return to, so it must have no position"
+        );
+    }
+
     #[test]
     fn a_channel_cannot_have_a_resume_point() {
         let conn = Connection::open_in_memory().unwrap();
         migrate(&conn).unwrap();
         let err = conn.execute(
-            "INSERT INTO resume_points VALUES (1,'channel','5',10,NULL,0)",
+            "INSERT INTO watch_state VALUES (1,'channel','5','in_progress',10,NULL,NULL,0)",
             [],
         );
         assert!(err.is_err(), "the CHECK constraint should reject 'channel'");

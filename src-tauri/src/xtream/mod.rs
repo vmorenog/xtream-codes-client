@@ -59,12 +59,44 @@ impl PlayableKind {
         !matches!(self, PlayableKind::Channel)
     }
 
+    pub fn as_favourite_kind(self) -> FavouriteKind {
+        match self {
+            PlayableKind::Channel => FavouriteKind::Channel,
+            PlayableKind::Movie => FavouriteKind::Movie,
+            PlayableKind::Episode => FavouriteKind::Episode,
+        }
+    }
+
     /// The path segment Xtream uses for this kind's **Stream URL**.
     fn url_segment(self) -> &'static str {
         match self {
             PlayableKind::Channel => "live",
             PlayableKind::Movie => "movie",
             PlayableKind::Episode => "series",
+        }
+    }
+}
+
+/// What a **Favourite** can point at.
+///
+/// Wider than `PlayableKind` because a **Series** is favouritable but not
+/// playable — you pin the show, then play an **Episode** of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FavouriteKind {
+    Channel,
+    Movie,
+    Episode,
+    Series,
+}
+
+impl FavouriteKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FavouriteKind::Channel => "channel",
+            FavouriteKind::Movie => "movie",
+            FavouriteKind::Episode => "episode",
+            FavouriteKind::Series => "series",
         }
     }
 }

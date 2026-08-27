@@ -111,6 +111,55 @@ pub struct ResumePoint {
     pub duration_secs: Option<i64>,
 }
 
+/// Which of the three a **Playable** is in. A **Channel** holds none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WatchState {
+    InProgress,
+    Watched,
+}
+
+impl WatchState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WatchState::InProgress => "in_progress",
+            WatchState::Watched => "watched",
+        }
+    }
+}
+
+/// One row of **Continue Watching**.
+///
+/// Either something the **Viewer** is part-way through, or the **Up Next** of a
+/// started **Series**. `isUpNext` tells the UI which, so it can say "S2E4" for
+/// one and show a progress bar for the other.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContinueItem {
+    pub kind: crate::xtream::PlayableKind,
+    pub ref_id: String,
+    pub name: String,
+    pub icon: Option<String>,
+    pub position_secs: Option<i64>,
+    pub duration_secs: Option<i64>,
+    pub updated_at: i64,
+    pub is_up_next: bool,
+    /// Present only for an **Episode**.
+    pub series_id: Option<i64>,
+    pub series_name: Option<String>,
+    pub season: Option<i64>,
+    pub episode_number: Option<i64>,
+}
+
+/// What Home shows above **Continue Watching**.
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Favourites {
+    pub channels: Vec<Channel>,
+    pub movies: Vec<Movie>,
+    pub series: Vec<Series>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchHit {
@@ -119,11 +168,31 @@ pub struct SearchHit {
     pub name: String,
 }
 
-/// What the UI sends when it wants something played or favourited.
+/// What the UI sends when it wants something played.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayableRef {
     pub provider_id: i64,
     pub kind: crate::xtream::PlayableKind,
     pub ref_id: String,
+}
+
+/// What the UI sends when it wants something starred. Wider than `PlayableRef`
+/// because a **Series** is favouritable but not playable.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FavouriteRef {
+    pub provider_id: i64,
+    pub kind: crate::xtream::FavouriteKind,
+    pub ref_id: String,
+}
+
+impl From<&PlayableRef> for FavouriteRef {
+    fn from(p: &PlayableRef) -> Self {
+        Self {
+            provider_id: p.provider_id,
+            kind: p.kind.as_favourite_kind(),
+            ref_id: p.ref_id.clone(),
+        }
+    }
 }

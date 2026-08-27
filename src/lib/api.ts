@@ -12,9 +12,18 @@ import { invoke } from "@tauri-apps/api/core";
 export type CatalogueKind = "live" | "movie" | "series";
 export type PlayableKind = "channel" | "movie" | "episode";
 
+/** Wider than PlayableKind: a Series is favouritable but not playable. */
+export type FavouriteKind = PlayableKind | "series";
+
 export interface PlayableRef {
   providerId: number;
   kind: PlayableKind;
+  refId: string;
+}
+
+export interface FavouriteRef {
+  providerId: number;
+  kind: FavouriteKind;
   refId: string;
 }
 
@@ -108,6 +117,28 @@ export interface SearchHit {
   name: string;
 }
 
+/** One row of Continue Watching: In Progress, or a Series' Up Next. */
+export interface ContinueItem {
+  kind: PlayableKind;
+  refId: string;
+  name: string;
+  icon: string | null;
+  positionSecs: number | null;
+  durationSecs: number | null;
+  updatedAt: number;
+  isUpNext: boolean;
+  seriesId: number | null;
+  seriesName: string | null;
+  season: number | null;
+  episodeNumber: number | null;
+}
+
+export interface Favourites {
+  channels: Channel[];
+  movies: Movie[];
+  series: Series[];
+}
+
 export interface PlayerStatus {
   running: boolean;
   playing: boolean;
@@ -153,14 +184,25 @@ export const api = {
   search: (providerId: number, query: string) =>
     invoke<SearchHit[]>("search", { providerId, query }),
 
-  toggleFavourite: (playable: PlayableRef) =>
-    invoke<boolean>("toggle_favourite", { playable }),
-  saveResumePoint: (
+  favourites: (providerId: number) =>
+    invoke<Favourites>("favourites", { providerId }),
+  continueWatching: (providerId: number, limit?: number) =>
+    invoke<ContinueItem[]>("continue_watching", { providerId, limit }),
+
+  toggleFavourite: (target: FavouriteRef) =>
+    invoke<boolean>("toggle_favourite", { target }),
+  isFavourite: (target: FavouriteRef) =>
+    invoke<boolean>("is_favourite", { target }),
+  saveWatchState: (
     playable: PlayableRef,
     positionSecs: number,
     durationSecs: number | null,
   ) =>
-    invoke<void>("save_resume_point", { playable, positionSecs, durationSecs }),
+    invoke<void>("save_watch_state", { playable, positionSecs, durationSecs }),
+  markWatched: (playable: PlayableRef) =>
+    invoke<void>("mark_watched", { playable }),
+  clearWatchState: (playable: PlayableRef) =>
+    invoke<void>("clear_watch_state", { playable }),
 
   play: (playable: PlayableRef) => invoke<void>("play", { playable }),
   playerStatus: () => invoke<PlayerStatus>("player_status"),

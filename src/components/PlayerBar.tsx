@@ -25,8 +25,8 @@ export function PlayerBar({ nowPlaying }: { nowPlaying: PlayableRef | null }) {
     const pos = data.positionSecs;
     if (Math.abs(pos - lastSaved.current) < 10) return;
     lastSaved.current = pos;
-    void api.saveResumePoint(nowPlaying, pos, data.durationSecs).catch(() => {
-      // A failed Resume Point write is not worth interrupting playback for.
+    void api.saveWatchState(nowPlaying, pos, data.durationSecs).catch(() => {
+      // A failed progress write is not worth interrupting playback for.
     });
   }, [data?.positionSecs, data?.playing, data?.durationSecs, nowPlaying]);
 

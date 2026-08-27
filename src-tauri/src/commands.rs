@@ -9,7 +9,7 @@ use crate::db::model::*;
 use crate::db::Db;
 use crate::error::{AppError, Result};
 use crate::player::{Player, PlayerStatus};
-use crate::xtream::{CatalogueKind, PlayableKind, XtreamClient};
+use crate::xtream::{CatalogueKind, XtreamClient};
 use crate::{credentials, sync};
 
 pub struct AppState {
@@ -211,12 +211,18 @@ pub fn search(
 // ---- Viewing state -------------------------------------------------------
 
 #[tauri::command]
-pub fn toggle_favourite(state: State<'_, AppState>, playable: PlayableRef) -> Result<bool> {
-    state.db.toggle_favourite(&playable)
+pub fn toggle_favourite(state: State<'_, AppState>, target: FavouriteRef) -> Result<bool> {
+    state.db.toggle_favourite(&target)
 }
 
 #[tauri::command]
-pub fn save_resume_point(
+pub fn is_favourite(state: State<'_, AppState>, target: FavouriteRef) -> Result<bool> {
+    state.db.is_favourite(&target)
+}
+
+/// Progress from the player. Promotes to **Watched** past 95% (ADR-0006).
+#[tauri::command]
+pub fn save_watch_state(
     state: State<'_, AppState>,
     playable: PlayableRef,
     position_secs: i64,
@@ -224,7 +230,36 @@ pub fn save_resume_point(
 ) -> Result<()> {
     state
         .db
-        .save_resume_point(&playable, position_secs, duration_secs)
+        .save_watch_state(&playable, position_secs, duration_secs)
+}
+
+/// "I meant to skip that" — the escape hatch for the one case **Up Next** gets
+/// wrong, a deliberately skipped **Episode** it would otherwise offer forever.
+#[tauri::command]
+pub fn mark_watched(state: State<'_, AppState>, playable: PlayableRef) -> Result<()> {
+    state.db.mark_watched(&playable)
+}
+
+/// Puts something back into **Continue Watching** after it was marked watched.
+#[tauri::command]
+pub fn clear_watch_state(state: State<'_, AppState>, playable: PlayableRef) -> Result<()> {
+    state.db.clear_watch_state(&playable)
+}
+
+// ---- Home ----------------------------------------------------------------
+
+#[tauri::command]
+pub fn favourites(state: State<'_, AppState>, provider_id: i64) -> Result<Favourites> {
+    state.db.favourites(provider_id)
+}
+
+#[tauri::command]
+pub fn continue_watching(
+    state: State<'_, AppState>,
+    provider_id: i64,
+    limit: Option<i64>,
+) -> Result<Vec<ContinueItem>> {
+    state.db.continue_watching(provider_id, limit.unwrap_or(20))
 }
 
 // ---- Playback ------------------------------------------------------------
@@ -270,14 +305,4 @@ pub async fn player_seek(state: State<'_, AppState>, seconds: i64) -> Result<()>
 #[tauri::command]
 pub async fn player_stop(state: State<'_, AppState>) -> Result<()> {
     state.player.stop().await
-}
-
-/// Exposed so the UI can label things without hard-coding the strings.
-#[tauri::command]
-pub fn playable_kinds() -> Vec<&'static str> {
-    vec![
-        PlayableKind::Channel.as_str(),
-        PlayableKind::Movie.as_str(),
-        PlayableKind::Episode.as_str(),
-    ]
 }

@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate } from "@tanstack/react-router";
-import { Clapperboard, Film, RefreshCw, Search, Tv } from "lucide-react";
+import { Clapperboard, Film, House, RefreshCw, Search, Tv } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import {
@@ -17,6 +17,7 @@ import { Button, Input, Muted } from "@/components/ui";
 import { PlayerBar } from "@/components/PlayerBar";
 
 const SECTIONS = [
+  { to: "/", label: "Home", icon: House },
   { to: "/live", label: "Live TV", icon: Tv },
   { to: "/movies", label: "Movies", icon: Film },
   { to: "/series", label: "Series", icon: Clapperboard },
@@ -88,6 +89,7 @@ function Sidebar({
             key={to}
             to={to}
             className="flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm hover:bg-[var(--accent)]"
+            activeOptions={{ exact: to === "/" }}
             activeProps={{ className: "bg-[var(--accent)] font-medium" }}
           >
             <Icon className="size-4" />

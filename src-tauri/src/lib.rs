@@ -45,13 +45,17 @@ pub fn run() {
             commands::schedule,
             commands::search,
             commands::toggle_favourite,
-            commands::save_resume_point,
+            commands::is_favourite,
+            commands::save_watch_state,
+            commands::mark_watched,
+            commands::clear_watch_state,
+            commands::favourites,
+            commands::continue_watching,
             commands::play,
             commands::player_status,
             commands::player_toggle_pause,
             commands::player_seek,
             commands::player_stop,
-            commands::playable_kinds,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
