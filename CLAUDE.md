@@ -78,6 +78,13 @@ Xtream Codes exposes a small JSON API plus direct stream paths — see
   deleting it is what made Up Next uncomputable. ADR-0006.
 - **Sync deletes Favourites.** Deliberately: it drops rows whose Playable has
   vanished or been renumbered into a different one. ADR-0007.
+- **Region is never parsed from a Channel name.** Only 29% carry a prefix and
+  the codes contradict the Categories (`|GB|` vs `UK -`). It comes from the
+  Category. ADR-0008.
+- **Channel counts do not match the Provider's.** Divider rows
+  (`======= BULGARIAN =======`) are dropped at Sync. ADR-0008.
+- **"Pin", "channel group" and "language" are banned words.** They are
+  **Favourite**, **Category** and **Region**. See CONTEXT.md.
 
 ## Conventions
 

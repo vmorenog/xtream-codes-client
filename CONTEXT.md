@@ -43,9 +43,22 @@ An on-demand show, containing **Seasons**, which contain **Episodes**.
 _Avoid_: show, TV series
 
 **Category**:
-A **Provider**-defined grouping. Categories never cross the Channel / Movie /
-Series boundary — each kind has its own set.
-_Avoid_: genre, group, folder
+A **Provider**-defined grouping such as `ES - FUTBOL`. Categories never cross
+the Channel / Movie / Series boundary — each kind has its own set. The Viewer
+cannot create or edit one.
+_Avoid_: genre, group, channel group, folder
+
+**Region**:
+The audience a **Category** is aimed at. A country or a language, because
+Providers conflate the two in one field — `ES - FUTBOL` is a country,
+`ARABIC - BEIN SPORTS` is a language. Derived from the Category, never from a
+**Channel** name, and correctable by the **Viewer**.
+_Avoid_: language, country, locale, market
+
+**Divider**:
+A row a **Provider** ships in place of a **Channel** purely to draw a line —
+`======= BULGARIAN =======`. Never playable, and not part of the **Catalogue**.
+_Avoid_: separator, header, placeholder
 
 **Playable**:
 Any single thing that can be played: a **Channel**, a **Movie**, or an
@@ -79,10 +92,11 @@ resumable, never silent on launch.
 _Avoid_: refresh, update, import, fetch
 
 **Favourite**:
-Something the **Viewer** has pinned for quick access: a **Channel**, **Movie**,
-**Episode** or **Series**. Wider than **Playable**, because a Series is worth
-pinning even though you play its Episodes rather than the Series itself.
-_Avoid_: bookmark, starred, pinned
+Something the **Viewer** has singled out for quick access: a **Channel**,
+**Movie**, **Episode**, **Series** or **Category**. Wider than **Playable**,
+because a Series is worth keeping even though you play its Episodes, and a
+Category is worth keeping even though you play nothing at all.
+_Avoid_: bookmark, starred, pinned, pin
 
 **Resume Point**:
 How far into a **Movie** or **Episode** the **Viewer** got. **Channels** have
@@ -120,9 +134,11 @@ _Avoid_: connection, playback
 ## Relationships
 
 - A **Viewer** holds one or more **Providers**
-- A **Favourite** points at a **Channel**, **Movie**, **Episode** or **Series**
+- A **Favourite** points at a **Channel**, **Movie**, **Episode**, **Series** or **Category**
 - A **Provider** grants one **Entitlement** and offers one **Catalogue**
 - A **Catalogue** contains many **Channels**, **Movies** and **Series**
+- A **Category** belongs to exactly one **Region**, or to none when it cannot be told
+- A **Region** is shown or hidden, and the **Viewer** decides the order of the shown ones
 - A **Series** contains **Seasons**, which contain **Episodes**
 - A **Channel**, a **Movie** and an **Episode** are each a **Playable**
 - A **Playable** resolves to exactly one **Stream URL**
@@ -164,6 +180,18 @@ _Avoid_: connection, playback
 > **Domain expert:** "Then it stays **Unwatched** and **Up Next** keeps offering
 > it. Marking it **Watched** by hand is how the **Viewer** says 'I meant to skip
 > that'."
+>
+> **Dev:** "Can I work out a **Channel**'s **Region** from its name? They mostly
+> start with `|ES|`."
+> **Domain expert:** "No. Fewer than a third of Channels carry one, and the
+> codes disagree with the **Categories** — Channels say `|GB|` where Categories
+> say `UK`. A Channel's Region is whatever its Category's Region is."
+>
+> **Dev:** "What Region is `HOLLAND`? There is no prefix."
+> **Domain expert:** "The Netherlands. Roughly a third of Categories are bare
+> country names like that, so the name itself has to be looked up when there is
+> no prefix. Anything still unrecognised has no Region, and the **Viewer** can
+> set it by hand."
 
 ## Flagged ambiguities
 
@@ -182,5 +210,14 @@ _Avoid_: connection, playback
 - **"continue watching"** was used loosely for both the collection and the act.
   Resolved: **Continue Watching** is the collection. The act is just playing.
 - **Favourite** was first defined as a **Playable**, which excluded **Series**.
-  Resolved: a Favourite is wider than a Playable. You pin a show; you play an
-  **Episode** of it.
+  Resolved: a Favourite is wider than a Playable. You keep a show; you play an
+  **Episode** of it. It was later widened again to include **Category**.
+- **"pin"** was used for singling out a **Category**, which is the same act as
+  starring a **Channel**. Resolved: there is one concept, **Favourite**. "Pin"
+  is banned so the two do not drift apart in the code.
+- **"channel group"** was used for what the Provider calls a **Category**.
+  Resolved: **Category**. There is no Viewer-created grouping in this app.
+- **"language"** was used for a setting that filters on things like `EX-YU` and
+  `ARABIC`, which are not languages, and `ES`, which is not one either.
+  Resolved: **Region**, defined as country-or-language, because the Provider
+  does not distinguish them.
