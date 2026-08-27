@@ -82,8 +82,14 @@ git tag v0.2.0 && git push --tags
 
 The tag is the single source of truth for the version: the workflow writes it
 into `package.json` and `Cargo.toml`, builds a universal `.dmg`, publishes the
-GitHub release, and bumps the cask in the tap. `tauri.conf.json` reads its
-version from `package.json`, so there is nothing to keep in step by hand.
+GitHub release, and bumps the cask in
+[vmorenog/homebrew-tap](https://github.com/vmorenog/homebrew-tap).
+`tauri.conf.json` reads its version from `package.json`, so there is nothing to
+keep in step by hand.
+
+The cask bump needs the `TAP_DEPLOY_KEY` secret — an SSH deploy key with write
+access to the tap and nothing else. If it is missing the release still
+publishes; only the bump is skipped.
 
 Other commands:
 

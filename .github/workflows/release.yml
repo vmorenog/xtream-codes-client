@@ -93,19 +93,37 @@ jobs:
 
       # Homebrew is the update path, so the cask has to move in lockstep with
       # the release or `brew upgrade` silently offers nothing.
+      #
+      # A deploy key rather than a PAT: it is scoped to the tap repo alone and
+      # never expires, so nothing here can reach any other repository.
       - name: Bump the cask
         env:
-          GH_TOKEN: ${{ secrets.TAP_TOKEN }}
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
         run: |
-          test -n "$GH_TOKEN" || { echo "TAP_TOKEN is not set; skipping cask bump"; exit 0; }
+          if [ -z "$TAP_DEPLOY_KEY" ]; then
+            echo "TAP_DEPLOY_KEY is not set; skipping the cask bump."
+            echo "The release is published; run this workflow again once it is."
+            exit 0
+          fi
           V="${{ steps.version.outputs.version }}"
           SHA="${{ steps.artifact.outputs.sha }}"
-          git clone "https://x-access-token:$GH_TOKEN@github.com/vmorenog/homebrew-tap.git" tap
+
+          mkdir -p ~/.ssh
+          printf '%s\n' "$TAP_DEPLOY_KEY" > ~/.ssh/tap_key
+          chmod 600 ~/.ssh/tap_key
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/tap_key -o IdentitiesOnly=yes"
+
+          git clone git@github.com:vmorenog/homebrew-tap.git tap
           mkdir -p tap/Casks
-          sed -e "s/@VERSION@/$V/g" -e "s/@SHA256@/$SHA/g" packaging/xtream.rb.tmpl > tap/Casks/xtream.rb
+          sed -e "s/@VERSION@/$V/g" -e "s/@SHA256@/$SHA/g" \
+            packaging/xtream.rb.tmpl > tap/Casks/xtream.rb
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Casks/xtream.rb
+          # A re-run of the same tag produces an identical cask; that is not a
+          # failure, so do not fail the job on an empty commit.
+          git diff --cached --quiet && { echo "cask already current"; exit 0; }
           git commit -m "xtream $V"
           git push

@@ -55,3 +55,8 @@ test on, and Windows brings its own code-signing bill.
   checksum on every tag, so there is no manual release step — but nobody is
   *told* an update exists. Tauri's own updater was rejected as a second update
   path that can disagree with Homebrew's, plus a private key to not lose.
+- The cask lives in a second repo, `vmorenog/homebrew-tap`, because a Homebrew
+  tap must be a repo named `homebrew-<name>`. CI writes to it with an SSH deploy
+  key (`TAP_DEPLOY_KEY`) rather than a personal access token: a deploy key
+  reaches that one repository and nothing else, and does not expire. Without the
+  secret the workflow still publishes the release and skips only the bump.
